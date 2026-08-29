@@ -1,0 +1,25 @@
+node_modules/
+vite.config.ts.timestamp-*.mjs
+dist/
+coverage/
+
+# Tauri-Buildartefakte
+src-tauri/target/
+
+# Generiertes Android-Projekt: bewusst ignoriert.
+# Der handgeschriebene native Code liegt versioniert in src-tauri/android-src/
+# und wird per `npm run android:patch` in gen/ eingespielt (siehe scripts/patch-android.mjs).
+# Damit geht bei `tauri android init` nichts verloren.
+src-tauri/gen/
+
+# Signierung / Secrets
+src-tauri/gen/android/app/keystore.properties
+*.keystore
+*.jks
+.env
+.env.local
+
+# Releaseartefakte
+*.apk
+*.aab
+*.idsig

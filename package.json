@@ -1,0 +1,51 @@
+{
+  "name": "slowshow",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Digitaler Bilderrahmen fuer Android-Tablets (Tauri 2 + Vue 3)",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "android:init": "tauri android init && node scripts/patch-android.mjs",
+    "android:patch": "node scripts/patch-android.mjs",
+    "android:dev": "node scripts/patch-android.mjs && tauri android dev",
+    "android:build": "node scripts/patch-android.mjs && tauri android build --apk",
+    "android:deploy": "powershell -ExecutionPolicy Bypass -File ./deploy-android.ps1",
+    "android:deploy:debug": "powershell -ExecutionPolicy Bypass -File ./deploy-android.ps1 -dev",
+    "icons": "node scripts/generate-icon.mjs && tauri icon src-tauri/icons/icon-source.png",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "vue-tsc --noEmit",
+    "rust:check": "cargo check --manifest-path src-tauri/Cargo.toml",
+    "rust:test": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "rust:fmt": "cargo fmt --manifest-path src-tauri/Cargo.toml",
+    "check": "npm run typecheck && npm run rust:check",
+    "verify": "npm run check && npm run test:run && npm run rust:test"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.1.1",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
+    "pinia": "^2.2.6",
+    "tauri-plugin-android-fs-api": "^28.1.0",
+    "vue": "^3.5.13",
+    "vue-i18n": "^10.0.5",
+    "vue-router": "^4.4.5"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@tauri-apps/cli": "^2.1.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "@vitest/coverage-v8": "^2.1.8",
+    "@vue/test-utils": "^2.4.6",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8",
+    "vue-tsc": "^2.1.10"
+  }
+}
