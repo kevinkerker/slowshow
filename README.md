@@ -1,0 +1,2 @@
+# slowshow
+Gallery for tablets
