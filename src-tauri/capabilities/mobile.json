@@ -1,0 +1,25 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "Android-Faehigkeiten fuer Slowshow",
+  "platforms": ["android"],
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "fs:allow-read-dir",
+      "allow": [{ "path": "$APPLOCALDATA/**" }]
+    },
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [{ "path": "$APPLOCALDATA/**" }]
+    },
+    "android-fs:allow-show-open-dir-picker",
+    "android-fs:allow-persist-picker-uri-permission",
+    "android-fs:allow-check-persisted-picker-uri-permission",
+    "android-fs:allow-read-dir",
+    "android-fs:allow-read-file",
+    "android-fs:allow-get-name",
+    "android-fs:allow-get-mime-type"
+  ]
+}

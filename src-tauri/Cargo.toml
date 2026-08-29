@@ -1,0 +1,72 @@
+[package]
+name = "slowshow"
+version = "0.1.0"
+edition = "2021"
+description = "Digitaler Bilderrahmen fuer Android-Tablets"
+license = "Apache-2.0"
+rust-version = "1.77"
+
+[lib]
+name = "slowshow_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri               = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs     = "2"
+tauri-plugin-log    = "2"
+serde               = { version = "1", features = ["derive"] }
+serde_json          = "1"
+
+# Bilddekodierung und -skalierung im Rust-Prozess (NF-13).
+# default-features = false + explizite Formatliste haelt die Binaergroesse klein (NF-10).
+image               = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+kamadak-exif        = "0.6"
+
+# Netzwerkquellen (FA-21, FA-23). rustls + webpki-roots statt native-roots:
+# der Android-Zertifikatsspeicher ist ueber rustls-native-certs nicht zuverlaessig erreichbar.
+reqwest             = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "stream", "json"] }
+quick-xml           = "0.37"
+percent-encoding    = "2"
+base64              = "0.22"
+
+# Heimnetz-Steuerung (FA-55)
+axum                = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+# MQTT-Client, reines Rust — laeuft damit ohne C-Cross-Compile auf Android.
+rumqttc             = { version = "0.24", default-features = false }
+tokio               = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "net"] }
+
+# Verschluesselung der Zugangsdaten (NF-05). Reines Rust, kein C-Cross-Compile.
+aes-gcm             = "0.10"
+getrandom           = "0.2"
+
+chrono              = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+log                 = "0.4"
+thiserror           = "2"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
+
+[target.'cfg(target_os = "android")'.dependencies]
+tauri-plugin-android-fs = "28"
+# Bruecke zu MainActivity.setScreenBrightness (FA-53).
+jni                     = "0.21"
+
+# Abhaengigkeiten auch im Debug-Build optimieren.
+#
+# Ohne das laeuft das `image`-Crate im Testbuild ohne Optimierung: Dekodieren
+# und Skalieren eines 12-MP-Fotos dauert dann Sekunden statt Sekundenbruchteile,
+# und ein Sync ueber ein Dutzend Bilder zieht sich ueber Minuten. Der eigene
+# Code bleibt unoptimiert, die Uebersetzungszeit also kurz.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
