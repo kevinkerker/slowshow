@@ -1,0 +1,72 @@
+<!--
+  Zusätzliche Manifest-Einträge für Slowshow.
+
+  Wird von scripts/patch-android.mjs in das generierte AndroidManifest.xml
+  eingefügt. Nicht direkt in gen/ bearbeiten — das Verzeichnis ist generiert
+  und gitignored.
+
+  Jeder Eintrag steht hier mit Begründung, weil das Data-Safety-Formular des
+  Play Store (RB-03) für jedes Recht eine Erklärung verlangt.
+-->
+<manifest-additions>
+
+  <permissions>
+    <!-- Netzzugriff für WebDAV- und Nextcloud-Quellen (FA-21, FA-23) sowie
+         für die Heimnetz-Steuerung (FA-55). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Zustand des Netzes prüfen, um bei fehlender Verbindung gar nicht erst
+         einen Sync zu starten — die Diashow läuft dann aus dem Cache (FA-26). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- R-04: Hersteller-Batterieoptimierungen beenden langlaufende Apps.
+         Die App fragt die Ausnahme aktiv an; ohne dieses Recht ist der Dialog
+         nicht aufrufbar. Google verlangt für dieses Recht eine Begründung im
+         Store-Eintrag — sie steht in docs/store-listing.md. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- Kein WRITE_EXTERNAL_STORAGE und kein READ_MEDIA_IMAGES:
+         der Zugriff auf lokale Ordner läuft ausschließlich über das Storage
+         Access Framework (FA-20). Der Nutzer wählt den Ordner selbst aus, die
+         App bekommt keinen pauschalen Medienzugriff. Das hält das
+         Data-Safety-Formular knapp und erfüllt NF-04. -->
+  </permissions>
+
+  <features>
+    <!-- Ein Bilderrahmen läuft auf Tablets ohne Telefonie und ohne Kamera.
+         `required="false"` hält die Geräteliste im Play Store weit. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+  </features>
+
+  <application-attributes>
+    <!-- HTTP im Heimnetz muss möglich bleiben: viele NAS-Systeme sprechen
+         intern ausschließlich unverschlüsselt (FA-21 nennt HTTP ausdrücklich). -->
+    <attribute name="android:usesCleartextTraffic" value="true" />
+
+    <!-- Konfiguration und Cache gehören nicht in ein Cloud-Backup:
+         die Datei mit den Zugangsdaten wäre sonst außerhalb des Geräts
+         (NF-04, NF-05, R-12). -->
+    <attribute name="android:allowBackup" value="false" />
+    <attribute name="android:fullBackupContent" value="false" />
+  </application-attributes>
+
+  <activity-attributes>
+    <!-- Querformat festhalten: der Rahmen hängt fest an der Wand, ein
+         Lagesensor-Wechsel mitten in der Diashow wäre störend (RB-02). -->
+    <attribute name="android:screenOrientation" value="sensorLandscape" />
+
+    <!-- Die Activity soll Größen- und Konfigurationsänderungen selbst
+         verarbeiten statt neu zu starten — ein Neustart würde die laufende
+         Diashow unterbrechen (NF-01). -->
+    <attribute
+      name="android:configChanges"
+      value="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|density" />
+
+    <!-- Im Ruhemodus soll der Rahmen ansprechbar bleiben, damit die
+         Heimnetz-Steuerung ihn wecken kann (FA-55). -->
+    <attribute name="android:turnScreenOn" value="true" />
+  </activity-attributes>
+
+</manifest-additions>
