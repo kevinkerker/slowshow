@@ -1,0 +1,43 @@
+/* Lokal gebündelte Schriften.
+ *
+ * NF-04 verbietet Drittanbieter-Aufrufe, FA-26 verlangt unterbrechungsfreien
+ * Betrieb bei Netzausfall — beides schließt das Laden von fonts.googleapis.com
+ * zur Laufzeit aus. Die Dateien werden einmalig beim Einrichten geholt:
+ *
+ *     node scripts/fetch-fonts.mjs
+ *
+ * Die Dateien liegen in public/fonts/ und nicht unter src/: so versucht Vite
+ * beim Bauen nicht, sie aufzuloesen — fehlende Schriften wuerden sonst den
+ * Build abbrechen statt still auf die Systemschrift zurueckzufallen.
+ *
+ * Fehlen sie, greifen die Systemschriften aus `--ss-font-ui` und
+ * `--ss-font-display`. Die App bleibt dann vollständig bedienbar, nur das
+ * Schriftbild weicht vom Entwurf ab.
+ *
+ * `font-display: block` statt `swap`: ein Bilderrahmen zeigt seine Uhr lieber
+ * einen Wimpernschlag später als in zwei verschiedenen Schriften nacheinander.
+ */
+
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: block;
+  src: url('/fonts/instrument-sans.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Cormorant Garamond';
+  font-style: normal;
+  font-weight: 300 400;
+  font-display: block;
+  src: url('/fonts/cormorant-garamond.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Cormorant Garamond';
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  src: url('/fonts/cormorant-garamond-italic.woff2') format('woff2');
+}

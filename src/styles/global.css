@@ -1,0 +1,137 @@
+/* Slowshow — Grundlagen.
+ *
+ * Bewusst konservativ gehalten (R-02): keine :has(), kein Container-Query,
+ * keine neuen Farbräume. Auf alten Tablets ist die System-WebView alt.
+ */
+
+@import './fonts.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--ss-bg);
+  color: var(--ss-text-body);
+  font-family: var(--ss-font-ui);
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+
+  /* Ein Bilderrahmen wird nicht gelesen und nicht markiert. Beides zu
+   * unterbinden verhindert versehentliche Textauswahl beim Wischen (FA-41). */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+
+  /* Kein Gummiband-Scrollen, kein Doppeltipp-Zoom — die Diashow soll sich
+   * nicht wie eine Webseite anfühlen. */
+  overscroll-behavior: none;
+  touch-action: manipulation;
+
+  /* Vollbild bis in die Display-Aussparungen (FA-01). */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* Eingabefelder dürfen selbstverständlich ausgewählt werden. */
+input,
+textarea,
+select {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  min-height: var(--ss-touch-target);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[role='button']:focus-visible {
+  outline: 2px solid var(--ss-accent);
+  outline-offset: 2px;
+}
+
+input[type='text'],
+input[type='password'],
+input[type='number'],
+input[type='time'],
+input[type='url'],
+select {
+  min-height: var(--ss-touch-target);
+  padding: 0 14px;
+  background: var(--ss-bg);
+  color: var(--ss-text-body);
+  border: 1px solid var(--ss-border-strong);
+  border-radius: var(--ss-radius-nav);
+  font: inherit;
+  width: 100%;
+}
+
+input::placeholder {
+  color: var(--ss-text-faint);
+}
+
+/* Bereiche, die scrollen dürfen, tun das ohne sichtbare Leiste — auf einem
+ * Bilderrahmen wäre sie nur optisches Rauschen. */
+.ss-scroll {
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.ss-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Wortmarke — Cormorant Garamond, wie im Design-Canvas. */
+.ss-wordmark {
+  font-family: var(--ss-font-display);
+  font-size: 26px;
+  color: var(--ss-text);
+  letter-spacing: 0.04em;
+}
+
+/* Kleine Versalien-Beschriftung, im Entwurf durchgängig verwendet. */
+.ss-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ss-text-faint);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+/* NF-11: Wer Bewegung reduziert haben möchte, bekommt keine Überblendungen
+ * und keinen Ken-Burns-Effekt. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

@@ -1,0 +1,87 @@
+/* Slowshow — Design-Tokens (E-13, Artboards in slowshow-app-design.html)
+ *
+ * Galerie-minimal: Tiefschwarz als Grund, Off-White als Text, Messing als
+ * einziger Akzent. Das Tiefschwarz ist kein Zufall — es ist OLED-freundlich
+ * und stützt damit NF-07 (Einbrennschutz) und R-08 (Dauerbetrieb).
+ *
+ * Die App hat bewusst nur ein Erscheinungsbild. Ein heller Modus wäre für
+ * einen Bilderrahmen im Dauerbetrieb sinnwidrig: Der Rahmen soll im dunklen
+ * Wohnzimmer nicht leuchten, und die Fotos sollen den einzigen hellen Bereich
+ * bilden.
+ */
+
+:root {
+  /* ── Flächen ─────────────────────────────────────────────────────────── */
+  --ss-bg: #0a0a0a;
+  --ss-bg-night: #000000;
+  --ss-surface: #100f0e;
+  /* Messinggetönte Fläche für aktive Navigation und Quellen-Symbole */
+  --ss-surface-accent: #17150f;
+
+  /* ── Linien ──────────────────────────────────────────────────────────── */
+  --ss-border: #1e1c19;
+  --ss-border-soft: #1c1b19;
+  --ss-border-strong: #26241f;
+  --ss-border-dashed: #2c2a25;
+
+  /* ── Text ────────────────────────────────────────────────────────────── */
+  --ss-text: #f2efe9;
+  --ss-text-strong: #eeebe5;
+  --ss-text-body: #e8e5e0;
+  --ss-text-accent: #e9dfc9;
+  --ss-text-muted: #8d8a83;
+  --ss-text-dim: #767268;
+  --ss-text-faint: #5c5952;
+  --ss-icon-muted: #6f6c65;
+  --ss-icon-soft: #a6a29a;
+
+  /* ── Akzent (Messing) ────────────────────────────────────────────────── */
+  --ss-accent: #c2a878;
+  --ss-accent-hover: #d8c29a;
+
+  /* ── Schalter ────────────────────────────────────────────────────────── */
+  --ss-toggle-off: #26241f;
+  --ss-toggle-knob-off: #55524b;
+
+  /* ── Nachtmodus (FA-54) ──────────────────────────────────────────────── */
+  --ss-night-clock: #2e2c29;
+  --ss-night-label: #1f1e1c;
+
+  /* ── Rückmeldung ─────────────────────────────────────────────────────── */
+  --ss-error: #c46686;
+  --ss-ok: var(--ss-accent);
+
+  /* ── Typografie ──────────────────────────────────────────────────────── */
+  /* Die Schriften werden lokal gebündelt, nie zur Laufzeit von Google Fonts
+   * geladen: NF-04 verbietet Drittanbieter, und FA-26 verlangt, dass die App
+   * bei Netzausfall unverändert weiterläuft.
+   * Einmalig einrichten mit: node scripts/fetch-fonts.mjs
+   * Ohne die Dateien greift die Systemschrift — die App bleibt bedienbar. */
+  --ss-font-ui: 'Instrument Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --ss-font-display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+
+  /* ── Form ────────────────────────────────────────────────────────────── */
+  --ss-radius-card: 12px;
+  --ss-radius-nav: 8px;
+  --ss-radius-pill: 999px;
+
+  /* ── Bewegung ────────────────────────────────────────────────────────── */
+  --ss-transition: 0.2s ease;
+
+  /* ── Maße ────────────────────────────────────────────────────────────── */
+  --ss-nav-width: 250px;
+  --ss-overlay-inset: 56px;
+}
+
+/* Die Bedienelemente sind für Fingerbedienung auf einem Tablet ausgelegt:
+ * 44 px ist die kleinste Fläche, die sich zuverlässig treffen lässt (FA-40). */
+:root {
+  --ss-touch-target: 44px;
+}
+
+@media (max-width: 900px) {
+  :root {
+    --ss-nav-width: 180px;
+    --ss-overlay-inset: 32px;
+  }
+}
