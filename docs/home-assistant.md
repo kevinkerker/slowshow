@@ -30,13 +30,13 @@ In Slowshow: **Einstellungen → System → MQTT** einschalten und eintragen:
 | Automatisch anmelden | an | legt die Entitäten selbst an |
 
 Das war es. Nach dem Verbinden erscheint in Home Assistant ein Gerät
-**Slowshow** mit zwölf Entitäten:
+**Slowshow** mit fünfzehn Entitäten:
 
 - **Schalter:** Diashow, Bildschirm, Helligkeit vom Gerät
 - **Knöpfe:** Nächstes Bild, Vorheriges Bild, Synchronisieren
 - **Zahlen:** Anzeigedauer (5 s … 30 min), Helligkeit (1 … 100 %)
-- **Sensoren:** Bilder im Cache, Cachegröße
-- **Binärsensoren:** Synchronisiert, Aktivzeit
+- **Sensoren:** Bilder im Cache, Cachegröße, Akkustand, Akkutemperatur
+- **Binärsensoren:** Synchronisiert, Aktivzeit, Lädt
 
 Kein YAML nötig. Abschnitt 3 brauchst du nur für den REST-Weg.
 
@@ -402,6 +402,7 @@ Antwort von `GET /api/status`:
   "intervalSeconds": 30,
   "brightness": 100,
   "deviceBrightness": false,
+  "battery": { "level": 87, "temperature": 29.4, "charging": true },
   "display": { "slideshowActive": true, "showNightClock": false, "brightness": 100 },
   "currentSlide": { "kind": "single", "id": "ea9c9c9a37489830" },
   "cache": { "images": 77, "bytes": 61341696, "maxBytes": 2147483648, "excluded": 0 },
@@ -410,6 +411,41 @@ Antwort von `GET /api/status`:
   ]
 }
 ```
+
+### Akku im Dauerbetrieb
+
+Ein Tablet, das monatelang bei 100 % am Netz hängt, altert deutlich schneller
+als eines im normalen Gebrauch; im schlechtesten Fall bläht sich der Akku auf.
+Slowshow liefert deshalb Ladestand, Temperatur und Ladezustand (E-23), regelt
+aber selbst nichts — das gehört an einen schaltbaren Zwischenstecker und damit
+zu Home Assistant.
+
+Eine Automatisierung, die den Ladevorgang zwischen 40 und 80 % taktet:
+
+```yaml
+automation:
+  - alias: "Slowshow Laden aus"
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.slowshow_akkustand
+        above: 80
+    actions:
+      - action: switch.turn_off
+        target: { entity_id: switch.steckdose_bilderrahmen }
+
+  - alias: "Slowshow Laden ein"
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.slowshow_akkustand
+        below: 40
+    actions:
+      - action: switch.turn_on
+        target: { entity_id: switch.steckdose_bilderrahmen }
+```
+
+Die Akkuwerte fehlen, solange die JNI-Brücke zur `MainActivity` nicht steht
+(etwa im Desktop-Build). Im Zustands-JSON steht dann `"battery": null`, und die
+Entitäten überspringen die Meldung, statt eine erfundene Zahl anzuzeigen.
 
 `brightness` ist die *eingestellte* Grundhelligkeit und liegt immer zwischen 1
 und 100 — der richtige Wert für einen Regler. `display.brightness` ist die

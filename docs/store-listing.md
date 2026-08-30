@@ -110,6 +110,26 @@ einmalig an; sie ist nicht erzwungen, und die Nutzung ohne Ausnahme bleibt
 möglich.
 ```
 
+### `FOREGROUND_SERVICE_SPECIAL_USE`
+
+Der Dienst-Typ `specialUse` verlangt eine gesonderte Erklärung im
+Play-Console-Formular. Sie muss zu der `<property>` im Manifest passen (E-24):
+
+```text
+Slowshow ist ein digitaler Bilderrahmen. Die Kernfunktion ist eine Diashow, die
+über Tage hinweg ohne Nutzerinteraktion weiterläuft, auf einem fest
+installierten und dauerhaft mit Strom versorgten Tablet.
+
+Ohne Vordergrunddienst stuft Android die App bei Speicherdruck als entbehrlich
+ein und beendet sie; der Bildschirm bleibt dann schwarz, bis jemand die App von
+Hand neu startet. Keiner der vordefinierten Dienst-Typen trifft zu: Slowshow
+gibt keine Medien wieder, ortet nicht, misst nichts und synchronisiert nicht im
+Hintergrund als Selbstzweck — die Bildanzeige selbst ist der Zweck.
+
+Der Dienst hält keine Wakelocks über die Anzeige hinaus und startet keine
+Netzwerkaktivität von sich aus.
+```
+
 ### Zugriff auf lokale Dateien
 
 ```text

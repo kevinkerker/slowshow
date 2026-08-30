@@ -12,6 +12,9 @@ export type PlayOrder = 'random' | 'fileName' | 'takenAt' | 'modified'
 /** Darstellung bei abweichendem Seitenverhältnis (FA-05). */
 export type FitMode = 'contain' | 'cover'
 
+/** Ausrichtung des Rahmens (E-26). Gegenstück zu `model::Orientation`. */
+export type Orientation = 'landscape' | 'portrait' | 'auto'
+
 /** Ziffern oder Zeiger (E-20). Gegenstück zu `model::ClockStyle`. */
 export type ClockStyle = 'digital' | 'analog'
 
@@ -152,6 +155,8 @@ export interface AppConfig {
   kenBurns: boolean
   /** Einstellungen erst nach langem Druck (FA-43). */
   protectSettings: boolean
+  /** Ausrichtung des Rahmens (E-26). */
+  orientation: Orientation
   language: 'auto' | 'de' | 'en'
   sources: Source[]
 }
@@ -178,6 +183,18 @@ export interface CacheEntry {
   addedAt: number
   lastShown: number | null
   excluded: boolean
+  /** Größe des Vorschaubilds, sobald eines erzeugt wurde (E-25). */
+  thumbBytes: number | null
+}
+
+/** Was der Bild-Browser anzeigt (E-25). */
+export type ImageFilter = 'all' | 'excluded' | 'included'
+
+/** Ein Ausschnitt des Cache-Index für den Bild-Browser (E-25). */
+export interface ImagePage {
+  entries: CacheEntry[]
+  /** Anzahl aller Einträge, die zum Filter passen. */
+  total: number
 }
 
 export interface CacheStats {
@@ -185,6 +202,8 @@ export interface CacheStats {
   bytes: number
   maxBytes: number
   excluded: number
+  /** Belegung durch Vorschaubilder (E-25), getrennt ausgewiesen. */
+  thumbBytes: number
 }
 
 /** Anzeigezustand aus dem Zeitplan (FA-52–54). */

@@ -70,6 +70,7 @@ pub fn set_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig)
     }
     let display = state.display_state();
     crate::brightness::apply(display.brightness);
+    crate::orientation::apply(updated.orientation);
     let _ = app.emit(events::CONFIG, &updated);
     let _ = app.emit(events::DISPLAY, display);
     Ok(updated)
@@ -161,15 +162,6 @@ pub fn include_image(state: State<'_, AppState>, id: String) -> Res<()> {
 }
 
 #[tauri::command]
-pub fn excluded_images(state: State<'_, AppState>) -> Vec<CacheEntry> {
-    state
-        .cache
-        .lock()
-        .map(|c| c.index().values().filter(|e| e.excluded).cloned().collect())
-        .unwrap_or_default()
-}
-
-#[tauri::command]
 pub fn cache_stats(state: State<'_, AppState>) -> CacheStats {
     let max = state.config_snapshot().cache.max_bytes;
     state
@@ -181,7 +173,111 @@ pub fn cache_stats(state: State<'_, AppState>) -> CacheStats {
             bytes: 0,
             max_bytes: max,
             excluded: 0,
+            thumb_bytes: 0,
         })
+}
+
+/// Setzt die eingestellte Ausrichtung am Fenster durch (E-26).
+///
+/// Wird vom Frontend beim Start gerufen und **nicht** in `setup()`: Tauris
+/// `_start_app` läuft auf einem eigenen Thread, `MainActivity.onCreate` kehrt
+/// sofort zurück, und `nativeRegisterActivity` rennt damit gegen `setup()`. Wer
+/// die Ausrichtung dort setzt, gewinnt das Rennen mal und verliert es mal —
+/// gemessen am Gerät blieb der Aufruf wirkungslos, ohne eine Spur im Log.
+///
+/// Wenn die WebView so weit ist, steht die Brücke sicher.
+#[tauri::command]
+pub fn apply_orientation(state: State<'_, AppState>) {
+    crate::orientation::apply(state.config_snapshot().orientation);
+}
+
+/// Meldet, wie der Rahmen gerade hängt (E-26).
+///
+/// Nötig nur für `Orientation::Auto`: dann bestimmt der Lagesensor die
+/// Ausrichtung, und allein die Oberfläche sieht das Ergebnis. Bei fester
+/// Einstellung schickt sie denselben Wert, den die Konfiguration ohnehin
+/// vorgibt — das ist billiger als eine Sonderbehandlung an beiden Enden.
+///
+/// Wirkt sich ausschließlich auf die Paarbildung aus (FA-08).
+#[tauri::command]
+pub fn set_frame_orientation(state: State<'_, AppState>, portrait: bool) {
+    state.set_frame_portrait(portrait);
+}
+
+// ── Bild-Browser (E-25) ──────────────────────────────────────────────────────
+
+/// Was der Browser anzeigen soll.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ImageFilter {
+    #[default]
+    All,
+    /// Nur ausgeschlossene Bilder (FA-30).
+    Excluded,
+    /// Nur solche, die in der Diashow laufen.
+    Included,
+}
+
+/// Ein Ausschnitt des Cache-Index für den Bild-Browser.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImagePage {
+    pub entries: Vec<CacheEntry>,
+    /// Anzahl aller Einträge, die zum Filter passen — für die Kopfzeile und
+    /// damit das Frontend weiß, wie weit es blättern kann.
+    pub total: usize,
+}
+
+/// Obergrenze je Abruf.
+///
+/// Der Browser lädt nachrangig nach, während gescrollt wird. Ohne Grenze würde
+/// ein Cache mit 5 000 Bildern rund anderthalb Megabyte JSON durch die
+/// IPC-Brücke schieben — genau die Art Last, gegen die R-03 gerichtet ist.
+const PAGE_LIMIT: usize = 200;
+
+/// Liefert einen sortierten Ausschnitt des Cache-Index (E-25).
+///
+/// Sortiert nach Aufnahmedatum, neueste zuerst — dieselbe Reihenfolge, die
+/// `PlayOrder::TakenAt` verwendet (FA-03), mit denselben Rückfällen. Wer im
+/// Browser nach einem Bild sucht, sucht es dort, wo es zeitlich hingehört.
+#[tauri::command]
+pub fn image_page(
+    state: State<'_, AppState>,
+    offset: usize,
+    limit: usize,
+    filter: ImageFilter,
+) -> ImagePage {
+    let Ok(cache) = state.cache.lock() else {
+        return ImagePage {
+            entries: Vec::new(),
+            total: 0,
+        };
+    };
+
+    let mut matching: Vec<&CacheEntry> = cache
+        .index()
+        .values()
+        .filter(|e| match filter {
+            ImageFilter::All => true,
+            ImageFilter::Excluded => e.excluded,
+            ImageFilter::Included => !e.excluded,
+        })
+        .collect();
+
+    // Zweiter Schlüssel ist die Id: bei gleichem Zeitstempel — etwa einer
+    // Serie ohne EXIF — wäre die Reihenfolge sonst von der HashMap abhängig
+    // und spränge zwischen zwei Abrufen derselben Seite.
+    matching.sort_by(|a, b| b.sort_time().cmp(&a.sort_time()).then(a.id.cmp(&b.id)));
+
+    let total = matching.len();
+    let entries = matching
+        .into_iter()
+        .skip(offset)
+        .take(limit.min(PAGE_LIMIT))
+        .cloned()
+        .collect();
+
+    ImagePage { entries, total }
 }
 
 // ── Quellenverwaltung ────────────────────────────────────────────────────────

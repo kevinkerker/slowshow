@@ -238,7 +238,52 @@ pub fn discovery(topics: &Topics, prefix: &str) -> Vec<Discovery> {
         })),
     );
 
+    // Akku im Dauerbetrieb (E-23). Die Regelung — Zwischenstecker zwischen 40
+    // und 80 % takten — gehört ins Smart Home, nicht in den Bilderrahmen; die
+    // App liefert nur die Messwerte.
+    add(
+        "sensor",
+        "battery",
+        common(json!({
+            "name": "Akkustand",
+            "unique_id": format!("slowshow_{node}_battery"),
+            "state_topic": topics.state,
+            // Leeres Ergebnis heisst in Home Assistant "diese Meldung
+            // ueberspringen". Ein eigenes `availability_topic` waere hier
+            // falsch: `common` setzt es bereits auf das Last-Will-Topic, und
+            // ein zweiter Wert nimmt der Entitaet die Ausfallerkennung.
+            "value_template": "{{ value_json.battery.level if value_json.battery else '' }}",
+            "unit_of_measurement": "%",
+            "device_class": "battery",
+            "state_class": "measurement",
+        })),
+    );
+    add(
+        "sensor",
+        "battery_temperature",
+        common(json!({
+            "name": "Akkutemperatur",
+            "unique_id": format!("slowshow_{node}_battery_temperature"),
+            "state_topic": topics.state,
+            "value_template": "{{ value_json.battery.temperature if value_json.battery else '' }}",
+            "unit_of_measurement": "°C",
+            "device_class": "temperature",
+            "state_class": "measurement",
+        })),
+    );
+
     // ── Binärsensoren ───────────────────────────────────────────────────────
+    add(
+        "binary_sensor",
+        "charging",
+        common(json!({
+            "name": "Lädt",
+            "unique_id": format!("slowshow_{node}_charging"),
+            "state_topic": topics.state,
+            "value_template": "{{ 'ON' if value_json.battery and value_json.battery.charging else 'OFF' }}",
+            "device_class": "battery_charging",
+        })),
+    );
     add(
         "binary_sensor",
         "syncing",
@@ -327,8 +372,8 @@ mod tests {
         let d = discovery(&t, "homeassistant");
         assert_eq!(
             d.len(),
-            12,
-            "3 Schalter, 3 Knoepfe, 2 Zahlen, 2 Sensoren, 2 Binaersensoren"
+            15,
+            "3 Schalter, 3 Knoepfe, 2 Zahlen, 4 Sensoren, 3 Binaersensoren"
         );
     }
 
@@ -342,6 +387,45 @@ mod tests {
         assert!(topics.contains(&"homeassistant/number/slowshow/interval/config"));
         assert!(topics.contains(&"homeassistant/binary_sensor/slowshow/syncing/config"));
         assert!(topics.contains(&"homeassistant/switch/slowshow/device_brightness/config"));
+        assert!(topics.contains(&"homeassistant/sensor/slowshow/battery/config"));
+        assert!(topics.contains(&"homeassistant/binary_sensor/slowshow/charging/config"));
+    }
+
+    #[test]
+    fn akku_entitaeten_behalten_die_ausfallerkennung_e_23() {
+        // `common` setzt fuer jede Entitaet das Last-Will-Topic. Wer fuer die
+        // Akkuwerte ein eigenes `availability_topic` setzt, nimmt ihnen genau
+        // das: sie zeigten dann bei abgestuerzter App weiter den letzten Wert.
+        let t = Topics::new("slowshow");
+        let d = discovery(&t, "homeassistant");
+        for name in ["battery", "battery_temperature"] {
+            let e = d
+                .iter()
+                .find(|x| x.topic.ends_with(&format!("/sensor/slowshow/{name}/config")))
+                .unwrap_or_else(|| panic!("{name} fehlt"));
+            assert_eq!(e.payload["availability_topic"], "slowshow/availability");
+            assert!(
+                e.payload.get("availability_template").is_none(),
+                "{name} darf die Verfuegbarkeit nicht selbst bestimmen"
+            );
+        }
+    }
+
+    #[test]
+    fn akkuwerte_ueberspringen_meldungen_ohne_daten_e_23() {
+        // Ohne JNI-Bruecke ist `battery` null. Ein leeres Ergebnis laesst Home
+        // Assistant die Meldung verwerfen; ohne die Abfrage stuende dort eine
+        // Fehlermeldung bei jedem Zustandsupdate.
+        let t = Topics::new("slowshow");
+        let d = discovery(&t, "homeassistant");
+        let e = d
+            .iter()
+            .find(|x| x.topic.ends_with("/sensor/slowshow/battery/config"))
+            .expect("Akkustand fehlt");
+        assert_eq!(
+            e.payload["value_template"],
+            "{{ value_json.battery.level if value_json.battery else '' }}"
+        );
     }
 
     #[test]

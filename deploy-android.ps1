@@ -65,6 +65,16 @@ if ($arm64) {
     Write-Host "Baue nur fuer aarch64 - drei Viertel der Uebersetzung entfallen."
 }
 
+# Vorhandenes APK wegraeumen, bevor Gradle baut.
+#
+# Gradles zipflinger schreibt inkrementell in das bestehende Archiv und laesst
+# verdraengte Bloecke physisch darin stehen -- gemessen: 633 MB Datei bei
+# 325 MB tatsaechlichem Inhalt, also noch einmal die komplette alte
+# Rust-Bibliothek als Leiche. Installiert wird nur der gueltige Teil, aber
+# `adb install` uebertraegt die ganze Datei.
+Get-ChildItem -Path "$outputs\*\$variant\*.apk" -ErrorAction SilentlyContinue |
+    Remove-Item -Force -ErrorAction SilentlyContinue
+
 npx @buildArgs
 if ($LASTEXITCODE -ne 0) { exit 1 }
 

@@ -1,5 +1,9 @@
 package dev.kerker.slowshow
 
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.ActivityInfo
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -24,6 +28,9 @@ import androidx.core.view.WindowInsetsControllerCompat
  *  - FA-01  Vollbild ohne Status- und Navigationsleiste (Immersive Sticky)
  *  - FA-50  Bildschirm bleibt dauerhaft an (FLAG_KEEP_SCREEN_ON)
  *  - FA-53  Displayhelligkeit aus der App heraus setzen
+ *  - R-08   Akkuzustand im Dauerbetrieb auslesen (E-23)
+ *  - NF-01  Vordergrunddienst gegen den Abschuss bei Speicherdruck (E-24)
+ *  - E-26   Ausrichtung des Rahmens aus der App heraus setzen
  *
  * Bewusst **nicht** übernommen aus vergleichbaren Projekten: `FLAG_SECURE`.
  * Für eine Tresor-App ist das richtig, für einen Bilderrahmen wäre es
@@ -67,9 +74,13 @@ class MainActivity : TauriActivity() {
         }
 
         enterImmersiveMode()
+
+        // Nach dem Immersive-Modus, damit ein Fehler im Dienst den sichtbaren
+        // Teil des Starts nicht aufhaelt (NF-01, E-24).
+        SlowshowService.start(this)
     }
 
-    /** Registriert diese Activity im Rust-Backend (siehe `src/brightness.rs`). */
+    /** Registriert diese Activity im Rust-Backend (siehe `src/android_bridge.rs`). */
     private external fun nativeRegisterActivity()
 
     /**
@@ -134,6 +145,62 @@ class MainActivity : TauriActivity() {
             params.screenBrightness = value
             window.attributes = params
         }
+    }
+
+    /**
+     * Ausrichtung des Rahmens setzen (E-26).
+     *
+     * Über `requestedOrientation` statt über das Manifest: ein fest montierter
+     * Rahmen wird einmal eingestellt und soll danach nie wieder drehen, aber
+     * *welche* Ausrichtung das ist, weiß erst der Nutzer beim Aufhängen.
+     *
+     * `SENSOR_LANDSCAPE` und `SENSOR_PORTRAIT` statt der festen Varianten:
+     * damit ist es gleichgültig, ob der Rahmen um 180 Grad gedreht hängt —
+     * das Kabel darf auf der Seite herauskommen, auf der die Steckdose ist.
+     *
+     * @param mode 0 = quer, 1 = hoch, 2 = dem Lagesensor folgen.
+     */
+    @Keep
+    fun setOrientation(mode: Int) {
+        runOnUiThread {
+            requestedOrientation = when (mode) {
+                1 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                2 -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+                else -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            }
+        }
+    }
+
+    /**
+     * Akkuzustand als "Prozent;Zehntelgrad;Laedt" (E-23).
+     *
+     * Eine Zeichenkette statt drei Werte, weil ein einzelner JNI-Aufruf mit
+     * String-Rückgabe erheblich weniger Zeremonie braucht als drei Aufrufe oder
+     * ein `int[]`. Zerlegt wird sie in `battery::parse` — dort hat sie Tests,
+     * hier hätte sie keine.
+     *
+     * Der Ladestand kommt aus dem `BatteryManager`, Temperatur und Netzbetrieb
+     * aus dem klebenden `ACTION_BATTERY_CHANGED`. Fällt eines davon aus, wird
+     * -1 gemeldet; `battery::parse` verwirft die Angabe dann, statt einen
+     * Rahmen mit 255 Prozent Ladestand nach Home Assistant zu senden.
+     */
+    @Keep
+    fun batteryState(): String = try {
+        val manager = getSystemService(BATTERY_SERVICE) as BatteryManager
+        val percent = manager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+
+        // Klebender Broadcast, deshalb `null` als Empfänger: das liest den
+        // zuletzt gesendeten Zustand, ohne einen Empfänger anzumelden — und
+        // umgeht damit die Flag-Pflicht aus Android 14 für echte Empfänger.
+        val status = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val deciCelsius = status?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+        val plugged = status?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+
+        "$percent;$deciCelsius;${if (plugged != 0) 1 else 0}"
+    } catch (e: Throwable) {
+        // Ein Bilderrahmen darf an der Akkuanzeige nicht scheitern (NF-01).
+        Log.w(TAG, "Akkuzustand nicht lesbar: $e")
+        "-1;-1;0"
     }
 
     /** Hilfsaufruf für Tests am Gerät: aktueller Zustand der Systemleisten. */

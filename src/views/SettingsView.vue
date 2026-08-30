@@ -11,11 +11,12 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import SourcesPane from '@/components/panes/SourcesPane.vue'
+import ImagesPane from '@/components/panes/ImagesPane.vue'
 import ShowPane from '@/components/panes/ShowPane.vue'
 import SchedulePane from '@/components/panes/SchedulePane.vue'
 import SystemPane from '@/components/panes/SystemPane.vue'
 
-type Pane = 'sources' | 'show' | 'schedule' | 'system'
+type Pane = 'sources' | 'images' | 'show' | 'schedule' | 'system'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -26,6 +27,14 @@ const NAV: Array<{ key: Pane; icon: string[] }> = [
     key: 'sources',
     icon: [
       'M3 7 L3 18 A2 2 0 0 0 5 20 L19 20 A2 2 0 0 0 21 18 L21 9 A2 2 0 0 0 19 7 L12 7 L10 4.5 L5 4.5 A2 2 0 0 0 3 6.5 Z',
+    ],
+  },
+  {
+    // Vier Kacheln — steht fuer das Raster, nicht fuer ein einzelnes Bild;
+    // das Symbol fuer „Diashow“ ist bereits ein Bild im Rahmen.
+    key: 'images',
+    icon: [
+      'M4 4.5 L10.5 4.5 L10.5 11 L4 11 Z M13.5 4.5 L20 4.5 L20 11 L13.5 11 Z M4 13 L10.5 13 L10.5 19.5 L4 19.5 Z M13.5 13 L20 13 L20 19.5 L13.5 19.5 Z',
     ],
   },
   { key: 'show', icon: ['M7 15 L10.5 10.5 L13 13.5 L15.5 10.8 L17 12.6'] },
@@ -85,6 +94,7 @@ const title = computed(() => t(`nav.${pane.value}`))
 
       <div class="content">
         <SourcesPane v-if="pane === 'sources'" />
+        <ImagesPane v-else-if="pane === 'images'" />
         <ShowPane v-else-if="pane === 'show'" />
         <SchedulePane v-else-if="pane === 'schedule'" />
         <SystemPane v-else />

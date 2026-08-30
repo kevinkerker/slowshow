@@ -3,18 +3,16 @@
  * Einstellungen der Diashow: Takt, Reihenfolge, Darstellung, Einblendungen
  * (FA-02, FA-03, FA-05 bis FA-08, FA-10, FA-30, NF-07).
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SettingRow from '../SettingRow.vue'
 import ToggleSwitch from '../ToggleSwitch.vue'
-import * as api from '@/lib/api'
 import { useConfigStore } from '@/stores/config'
 import { formatInterval } from '@/lib/format'
-import type { CacheEntry, ClockStyle, FitMode, PlayOrder } from '@/lib/types'
+import type { ClockStyle, FitMode, Orientation, PlayOrder } from '@/lib/types'
 
 const { t } = useI18n()
 const store = useConfigStore()
-const excluded = ref<CacheEntry[]>([])
 
 const cfg = computed(() => store.config)
 
@@ -29,6 +27,7 @@ const INTERVALS = [5, 10, 15, 30, 60, 120, 300, 600, 1800]
 const ORDERS: PlayOrder[] = ['random', 'fileName', 'takenAt', 'modified']
 const FIT_MODES: FitMode[] = ['contain', 'cover']
 const CLOCK_STYLES: ClockStyle[] = ['digital', 'analog']
+const ORIENTATIONS: Orientation[] = ['landscape', 'portrait', 'auto']
 
 function orderLabel(order: PlayOrder): string {
   return t(
@@ -41,16 +40,6 @@ function orderLabel(order: PlayOrder): string {
   )
 }
 
-async function loadExcluded() {
-  excluded.value = await api.excludedImages()
-}
-
-async function restore(id: string) {
-  await api.includeImage(id)
-  await loadExcluded()
-}
-
-onMounted(loadExcluded)
 </script>
 
 <template>
@@ -74,6 +63,21 @@ onMounted(loadExcluded)
         >
           <option v-for="o in ORDERS" :key="o" :value="o">{{ orderLabel(o) }}</option>
         </select>
+      </SettingRow>
+
+      <!-- Ganz oben, weil davon abhängt, wie alles darunter aussieht (E-26). -->
+      <SettingRow :label="t('show.orientation')" :hint="t('show.orientationHint')">
+        <div class="ss-segmented">
+          <button
+            v-for="o in ORIENTATIONS"
+            :key="o"
+            class="ss-segment"
+            :class="{ active: cfg.orientation === o }"
+            @click="store.patch((d) => (d.orientation = o))"
+          >
+            {{ t(`orientation.${o}`) }}
+          </button>
+        </div>
       </SettingRow>
 
       <SettingRow
@@ -127,7 +131,10 @@ onMounted(loadExcluded)
         />
       </SettingRow>
 
-      <SettingRow :label="t('show.pairMode')" :hint="t('show.pairModeHint')">
+      <SettingRow
+        :label="t('show.pairMode')"
+        :hint="cfg.orientation === 'portrait' ? t('show.pairModeHintPortrait') : t('show.pairModeHint')"
+      >
         <ToggleSwitch
           :model-value="cfg.pairMode"
           :label="t('show.pairMode')"
@@ -210,17 +217,8 @@ onMounted(loadExcluded)
       </SettingRow>
     </section>
 
-    <!-- Ausschlussliste (FA-30) -->
-    <section>
-      <h3 class="ss-label">{{ t('show.excluded') }}</h3>
-      <p v-if="excluded.length === 0" class="muted">{{ t('show.excludedNone') }}</p>
-      <ul v-else class="excluded">
-        <li v-for="entry in excluded" :key="entry.id">
-          <span class="file">{{ entry.fileName }}</span>
-          <button class="link" @click="restore(entry.id)">{{ t('show.restore') }}</button>
-        </li>
-      </ul>
-    </section>
+    <!-- Die Ausschlussliste (FA-30) sitzt seit E-25 im Bild-Browser: dort
+         steht sie mit Vorschaubildern statt als Verzeichnis von Dateinamen. -->
   </div>
 </template>
 
@@ -271,32 +269,4 @@ section > .ss-label {
   color: var(--ss-text-dim);
 }
 
-.excluded {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.excluded li {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--ss-border-soft);
-}
-
-.file {
-  flex-grow: 1;
-  font-size: 14px;
-  color: var(--ss-text-body);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.link {
-  padding: 0 12px;
-  font-size: 14px;
-  color: var(--ss-accent);
-}
 </style>

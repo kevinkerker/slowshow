@@ -21,7 +21,12 @@ pub enum Slide {
     Single {
         id: String,
     },
-    /// Zwei Hochformatbilder nebeneinander (FA-08).
+    /// Zwei Bilder gleichzeitig (FA-08).
+    ///
+    /// Im Querformat zwei Hochformatfotos nebeneinander, im Hochformat zwei
+    /// Querformatfotos übereinander (E-26). Die Feldnamen bleiben `left` und
+    /// `right`, weil die Anordnung Sache der Darstellung ist und ein zweiter
+    /// Variantenname jede Stelle im Frontend verdoppeln würde.
     Pair {
         left: String,
         right: String,
@@ -159,18 +164,30 @@ impl Playlist {
     }
 
     /// Das aktuell anzuzeigende Bild bzw. Bildpaar.
-    pub fn current(&self, pair_mode: bool, index: &CacheIndex) -> Option<Slide> {
-        self.slide_at(self.pos, pair_mode, index)
+    ///
+    /// `frame_portrait` beschreibt, wie der Rahmen hängt (E-26) — davon hängt
+    /// ab, welches Seitenverhältnis überhaupt gepaart werden kann.
+    pub fn current(&self, pair_mode: bool, frame_portrait: bool, index: &CacheIndex) -> Option<Slide> {
+        self.slide_at(self.pos, pair_mode, frame_portrait, index)
     }
 
-    fn slide_at(&self, pos: usize, pair_mode: bool, index: &CacheIndex) -> Option<Slide> {
+    fn slide_at(
+        &self,
+        pos: usize,
+        pair_mode: bool,
+        frame_portrait: bool,
+        index: &CacheIndex,
+    ) -> Option<Slide> {
         let first = self.order.get(pos)?;
         if pair_mode {
-            // Nur zwei aufeinanderfolgende Hochformatbilder werden gepaart;
-            // ein Querformatbild bleibt immer allein (FA-08).
+            // Gepaart wird immer das Format, das *nicht* zum Rahmen passt:
+            // quer zwei Hochformatfotos nebeneinander (FA-08), hochkant zwei
+            // Querformatfotos übereinander (E-26). Ein Bild im Format des
+            // Rahmens füllt ihn allein und bleibt allein.
+            let pairable = |e: &crate::cache::index::CacheEntry| e.is_portrait() != frame_portrait;
             if let (Some(a), Some(b)) = (index.get(first), self.order.get(pos + 1)) {
                 if let Some(b_entry) = index.get(b) {
-                    if a.is_portrait() && b_entry.is_portrait() {
+                    if pairable(a) && pairable(b_entry) {
                         return Some(Slide::Pair {
                             left: first.clone(),
                             right: b.clone(),
@@ -186,6 +203,7 @@ impl Playlist {
     pub fn advance(
         &mut self,
         pair_mode: bool,
+        frame_portrait: bool,
         index: &CacheIndex,
         next_seed: u64,
     ) -> Option<Slide> {
@@ -193,7 +211,7 @@ impl Playlist {
             return None;
         }
         let step = self
-            .current(pair_mode, index)
+            .current(pair_mode, frame_portrait, index)
             .map(|s| s.step_size())
             .unwrap_or(1);
         let next = self.pos + step;
@@ -203,12 +221,12 @@ impl Playlist {
         } else {
             self.pos = next;
         }
-        self.current(pair_mode, index)
+        self.current(pair_mode, frame_portrait, index)
     }
 
     /// Einen Schritt zurück (FA-41). Bewusst immer nur um eine Position,
     /// damit das Zurückwischen im Paar-Modus nicht springt.
-    pub fn back(&mut self, pair_mode: bool, index: &CacheIndex) -> Option<Slide> {
+    pub fn back(&mut self, pair_mode: bool, frame_portrait: bool, index: &CacheIndex) -> Option<Slide> {
         if self.order.is_empty() {
             return None;
         }
@@ -217,7 +235,7 @@ impl Playlist {
         } else {
             self.pos - 1
         };
-        self.current(pair_mode, index)
+        self.current(pair_mode, frame_portrait, index)
     }
 
     /// Springt gezielt auf ein Bild — z. B. nachdem das aktuelle Bild
@@ -269,6 +287,7 @@ mod tests {
             added_at: 0,
             last_shown: None,
             excluded: false,
+            thumb_bytes: None,
         }
     }
 
@@ -277,6 +296,67 @@ mod tests {
             width: 1080,
             height: 1920,
             ..entry(id, "s", id)
+        }
+    }
+
+    #[test]
+    fn hochformat_paart_querformatfotos_uebereinander_e_26() {
+        // Das Spiegelbild von FA-08: haengt der Rahmen hochkant, sind die
+        // Querformatfotos die schlecht passenden -- zwei davon fuellen ihn
+        // genauso, wie zwei Hochformate ihn quer fuellen.
+        let idx = index_of(vec![entry("a", "s", "a"), entry("b", "s", "b")]);
+        let mut pl = Playlist::new();
+        pl.replace(vec!["a".into(), "b".into()], 1);
+
+        assert_eq!(
+            pl.current(true, true, &idx),
+            Some(Slide::Pair {
+                left: "a".into(),
+                right: "b".into()
+            }),
+            "hochkant werden Querformate gepaart"
+        );
+        assert_eq!(
+            pl.current(true, false, &idx),
+            Some(Slide::Single { id: "a".into() }),
+            "quer bleibt ein Querformat allein"
+        );
+    }
+
+    #[test]
+    fn hochformat_laesst_hochformatfotos_allein_e_26() {
+        // Ein Bild im Format des Rahmens fuellt ihn allein.
+        let idx = index_of(vec![portrait("a"), portrait("b")]);
+        let mut pl = Playlist::new();
+        pl.replace(vec!["a".into(), "b".into()], 1);
+
+        assert_eq!(
+            pl.current(true, true, &idx),
+            Some(Slide::Single { id: "a".into() })
+        );
+        assert_eq!(
+            pl.current(true, false, &idx),
+            Some(Slide::Pair {
+                left: "a".into(),
+                right: "b".into()
+            }),
+            "quer gilt weiterhin FA-08"
+        );
+    }
+
+    #[test]
+    fn gemischte_formate_werden_nie_gepaart_e_26() {
+        // Ein Hoch- und ein Querformat nebeneinander ergaebe in beiden
+        // Ausrichtungen einen unruhigen Schirm.
+        let idx = index_of(vec![portrait("a"), entry("b", "s", "b")]);
+        let mut pl = Playlist::new();
+        pl.replace(vec!["a".into(), "b".into()], 1);
+        for frame_portrait in [true, false] {
+            assert_eq!(
+                pl.current(true, frame_portrait, &idx),
+                Some(Slide::Single { id: "a".into() }),
+                "frame_portrait={frame_portrait}"
+            );
         }
     }
 
@@ -383,15 +463,15 @@ mod tests {
         pl.replace(vec!["a".into(), "b".into()], 1);
 
         assert_eq!(
-            pl.current(false, &idx),
+            pl.current(false, false, &idx),
             Some(Slide::Single { id: "a".into() })
         );
         assert_eq!(
-            pl.advance(false, &idx, 2),
+            pl.advance(false, false, &idx, 2),
             Some(Slide::Single { id: "b".into() })
         );
         assert_eq!(
-            pl.advance(false, &idx, 3),
+            pl.advance(false, false, &idx, 3),
             Some(Slide::Single { id: "a".into() })
         );
         assert_eq!(pl.seed(), 3, "beim Umlauf wird neu gemischt");
@@ -402,16 +482,16 @@ mod tests {
         let idx = index_of(vec![entry("a", "s", "a"), entry("b", "s", "b")]);
         let mut pl = Playlist::new();
         pl.replace(vec!["a".into(), "b".into()], 1);
-        assert_eq!(pl.back(false, &idx), Some(Slide::Single { id: "b".into() }));
+        assert_eq!(pl.back(false, false, &idx), Some(Slide::Single { id: "b".into() }));
     }
 
     #[test]
     fn leere_playlist_liefert_nichts_statt_zu_paniken() {
         let idx = index_of(vec![]);
         let mut pl = Playlist::new();
-        assert!(pl.current(false, &idx).is_none());
-        assert!(pl.advance(false, &idx, 1).is_none());
-        assert!(pl.back(false, &idx).is_none());
+        assert!(pl.current(false, false, &idx).is_none());
+        assert!(pl.advance(false, false, &idx, 1).is_none());
+        assert!(pl.back(false, false, &idx).is_none());
         assert!(pl.window(5).is_empty());
     }
 
@@ -420,12 +500,12 @@ mod tests {
         let idx = index_of(vec![entry("a", "s", "a"), entry("b", "s", "b")]);
         let mut pl = Playlist::new();
         pl.replace(vec!["a".into(), "b".into()], 1);
-        pl.advance(false, &idx, 1); // steht jetzt auf "b"
+        pl.advance(false, false, &idx, 1); // steht jetzt auf "b"
 
         // Sync bringt ein neues Bild -> Reihenfolge wird neu aufgebaut.
         pl.replace(vec!["neu".into(), "a".into(), "b".into()], 2);
         assert_eq!(
-            pl.current(false, &idx),
+            pl.current(false, false, &idx),
             Some(Slide::Single { id: "b".into() }),
             "die Diashow darf nicht an den Anfang springen"
         );
@@ -453,7 +533,7 @@ mod tests {
         pl.replace(vec!["p1".into(), "p2".into()], 1);
 
         assert_eq!(
-            pl.current(true, &idx),
+            pl.current(true, false, &idx),
             Some(Slide::Pair {
                 left: "p1".into(),
                 right: "p2".into()
@@ -461,7 +541,7 @@ mod tests {
         );
         // Ein Paar verbraucht zwei Positionen.
         assert_eq!(
-            pl.advance(true, &idx, 2),
+            pl.advance(true, false, &idx, 2),
             Some(Slide::Pair {
                 left: "p1".into(),
                 right: "p2".into()
@@ -475,7 +555,7 @@ mod tests {
         let mut pl = Playlist::new();
         pl.replace(vec!["p1".into(), "q".into()], 1);
         assert_eq!(
-            pl.current(true, &idx),
+            pl.current(true, false, &idx),
             Some(Slide::Single { id: "p1".into() })
         );
     }
@@ -486,7 +566,7 @@ mod tests {
         let mut pl = Playlist::new();
         pl.replace(vec!["p1".into(), "p2".into()], 1);
         assert_eq!(
-            pl.current(false, &idx),
+            pl.current(false, false, &idx),
             Some(Slide::Single { id: "p1".into() })
         );
     }
@@ -497,7 +577,7 @@ mod tests {
         let mut pl = Playlist::new();
         pl.replace(vec!["p1".into()], 1);
         assert_eq!(
-            pl.current(true, &idx),
+            pl.current(true, false, &idx),
             Some(Slide::Single { id: "p1".into() })
         );
     }
@@ -516,7 +596,7 @@ mod tests {
         let idx = index_of(vec![entry("a", "s", "a"), entry("b", "s", "b")]);
         let mut pl = Playlist::new();
         pl.replace(vec!["a".into(), "b".into()], 1);
-        pl.advance(false, &idx, 1); // auf "b"
+        pl.advance(false, false, &idx, 1); // auf "b"
         assert_eq!(
             pl.window(2),
             vec!["b", "a"],

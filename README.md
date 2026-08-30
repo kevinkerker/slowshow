@@ -102,9 +102,21 @@ node scripts/patch-android.mjs
 Danach:
 
 ```powershell
-.\deploy-android.ps1          # Release-APK bauen, installieren, starten
-.\deploy-android.ps1 -dev     # Debug-APK mit Chrome DevTools
+.\deploy-android.ps1                # Release-APK bauen, installieren, starten
+.\deploy-android.ps1 -dev           # Debug-APK mit Chrome DevTools
+.\deploy-android.ps1 -dev -arm64    # nur fuers Tablet  <- schnellster Weg
 ```
+
+`-arm64` baut nur für `aarch64` statt für alle vier ABIs. Gradle ruft den
+Rust-Build einmal *je ABI* auf, es entfällt also drei Viertel der Übersetzung,
+und das Debug-APK schrumpft von rund 1.441 MB auf 325 MB — die ungestrippten
+Rust-Debug-Bibliotheken machen den Großteil aus. Für ein Play-Store-Release
+werden weiterhin alle ABIs gebraucht.
+
+Das Skript löscht vor dem Bauen das vorhandene APK. Gradles `zipflinger`
+schreibt sonst inkrementell in das bestehende Archiv und lässt verdrängte
+Blöcke darin stehen: gemessen 633 MB Datei bei 325 MB tatsächlichem Inhalt.
+Installiert wird zwar nur der gültige Teil, übertragen aber die ganze Datei.
 
 `patch-android.mjs` läuft dabei automatisch mit. Die APK-Pfade:
 
@@ -129,8 +141,9 @@ Was dabei zu erwarten ist:
 
 - **Android 10 oder neuer** genügt (`minSdk 29`), also praktisch jedes Gerät
   der letzten Jahre.
-- Die App **erzwingt Querformat** (`sensorLandscape`), weil ein Bilderrahmen an
-  der Wand hängt. Das Telefon also quer halten.
+- Die App startet im **Querformat** und lässt sich in den Einstellungen auf
+  Hochformat oder Lagesensor umstellen (E-26). Die Voreinstellung ist quer,
+  weil ein Bilderrahmen an der Wand hängt — das Telefon also quer halten.
 - Das Layout schaltet unter 900 px Breite und unter 520 px Höhe auf kompaktere
   Maße um. Ein Telefon im Querformat liegt bei rund 850 × 390 CSS-Pixeln und
   trifft damit beide Stufen.
@@ -212,7 +225,9 @@ Endpunkte: `GET /api/status`, `POST /api/slideshow`, `POST /api/screen`,
 
 `POST /api/config` nimmt einzelne Felder, darunter `brightness` und
 `deviceBrightness` — Letzteres gibt die Helligkeitsregelung an das Tablet
-zurück (E-22).
+zurück (E-22). `GET /api/status` liefert zusätzlich `battery` mit Ladestand,
+Temperatur und Ladezustand (E-23); daraus lässt sich in Home Assistant eine
+Ladeautomatik bauen, die den Akku im Dauerbetrieb schont.
 
 Fertige Konfiguration für Home Assistant — Sensoren, Schalter und
 Automatisierungen: [docs/home-assistant.md](docs/home-assistant.md).

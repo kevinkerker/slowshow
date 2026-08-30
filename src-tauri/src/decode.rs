@@ -192,6 +192,45 @@ pub fn parse_exif_datetime(s: &str) -> Option<i64> {
         .map(|dt| dt.timestamp())
 }
 
+/// Lange Kante der Vorschaubilder in Pixeln (E-25).
+///
+/// 320 statt 192: das Referenzgerät hat 2,5-fache Pixeldichte, eine Zelle von
+/// 128 CSS-Pixeln braucht also 320 echte. Kleiner wäre auf dem Pad sichtbar
+/// weich.
+pub const THUMB_EDGE: u32 = 320;
+
+/// Qualität der Vorschaubilder.
+///
+/// Niedriger als bei der Cache-Ablage: bei 320 px fällt der Unterschied nicht
+/// auf, und die Vorschaubilder gehen als Gesamtheit in die Cachegröße ein.
+const THUMB_QUALITY: u8 = 78;
+
+/// Erzeugt ein Vorschaubild aus einer bereits aufbereiteten Cache-Datei.
+///
+/// Bewusst aus dem Cache-Bild und nicht aus dem Original: das Original liegt
+/// nach dem Sync nicht mehr vor (NF-12), und für 320 px ist der Unterschied
+/// ohnehin nicht sichtbar. Dadurch lassen sich Vorschaubilder auch für Einträge
+/// nachziehen, die vor E-25 in den Cache kamen.
+///
+/// `Triangle` statt `Lanczos3`: beim Verkleinern auf 320 px ist der Unterschied
+/// nicht erkennbar, die Rechenzeit aber um ein Vielfaches kürzer — und diese
+/// Funktion läuft im Zweifel für tausende Bilder hintereinander.
+pub fn thumbnail(cached_bytes: &[u8], edge: u32) -> Result<Vec<u8>, DecodeError> {
+    let img = image::load_from_memory(cached_bytes)?;
+    let (tw, th) = fit_within(img.width(), img.height(), edge, edge);
+    let img = img.resize_exact(tw, th, image::imageops::FilterType::Triangle);
+
+    let rgb = img.into_rgb8();
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, THUMB_QUALITY).write_image(
+        rgb.as_raw(),
+        tw,
+        th,
+        image::ExtendedColorType::Rgb8,
+    )?;
+    Ok(out)
+}
+
 // ── Hauptpfad ────────────────────────────────────────────────────────────────
 
 /// Dekodiert, richtet aus, skaliert und re-kodiert ein Bild für den Cache.
@@ -253,6 +292,45 @@ pub fn prepare(
 mod tests {
     use super::*;
     use image::{Rgb, RgbImage};
+
+    #[test]
+    fn thumbnail_passt_in_die_vorgegebene_kante_e_25() {
+        let src = test_jpeg(1920, 1080);
+        let thumb = thumbnail(&src, THUMB_EDGE).expect("Vorschaubild");
+        let img = image::load_from_memory(&thumb).unwrap();
+        assert_eq!(img.width(), THUMB_EDGE, "lange Kante liegt auf dem Zielmass");
+        assert_eq!(img.height(), 180, "Seitenverhaeltnis bleibt erhalten");
+    }
+
+    #[test]
+    fn thumbnail_haelt_auch_hochformat_ein_e_25() {
+        let thumb = thumbnail(&test_jpeg(1080, 1920), THUMB_EDGE).expect("Vorschaubild");
+        let img = image::load_from_memory(&thumb).unwrap();
+        assert_eq!(img.height(), THUMB_EDGE);
+        assert_eq!(img.width(), 180);
+    }
+
+    #[test]
+    fn thumbnail_vergroessert_kleine_bilder_nicht() {
+        // `fit_within` skaliert nie hoch. Ein 200-px-Bild bliebe sonst als
+        // aufgeblasenes 320-px-JPEG im Cache liegen, ohne besser auszusehen.
+        let thumb = thumbnail(&test_jpeg(200, 150), THUMB_EDGE).expect("Vorschaubild");
+        let img = image::load_from_memory(&thumb).unwrap();
+        assert_eq!((img.width(), img.height()), (200, 150));
+    }
+
+    #[test]
+    fn thumbnail_ist_deutlich_kleiner_als_die_cache_datei() {
+        // Der Sinn der Sache: bei 5 000 Bildern zaehlt jedes Kilobyte.
+        let src = test_jpeg(1920, 1080);
+        let thumb = thumbnail(&src, THUMB_EDGE).expect("Vorschaubild");
+        assert!(
+            thumb.len() * 4 < src.len(),
+            "Vorschau {} B gegen Original {} B",
+            thumb.len(),
+            src.len()
+        );
+    }
 
     fn test_jpeg(w: u32, h: u32) -> Vec<u8> {
         let mut img = RgbImage::new(w, h);

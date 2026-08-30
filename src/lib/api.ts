@@ -13,6 +13,8 @@ import type {
   CacheEntry,
   CacheStats,
   DisplayState,
+  ImageFilter,
+  ImagePage,
   MqttStatus,
   Slide,
   Source,
@@ -30,7 +32,52 @@ export function imageUrl(id: string): string {
   return convertFileSrc(id, 'slowshow')
 }
 
+/**
+ * Präfix, an dem das Rust-Backend ein Vorschaubild erkennt (E-25).
+ *
+ * Muss mit `THUMB_PREFIX` in `src-tauri/src/lib.rs` übereinstimmen — die
+ * Grenze prüft kein Compiler, deshalb steht sie in `api.test.ts`.
+ */
+export const THUMB_PREFIX = 't_'
+
+/**
+ * URL des Vorschaubilds (E-25).
+ *
+ * Ein Präfix statt eines eigenen Pfadsegments: `convertFileSrc` steckt die Id
+ * per `encodeURIComponent` in *ein* Segment, aus `thumb/<id>` würde also
+ * `thumb%2F<id>`. Buchstabe und Unterstrich überstehen die Kodierung
+ * unverändert.
+ */
+export function thumbUrl(id: string): string {
+  return convertFileSrc(THUMB_PREFIX + id, 'slowshow')
+}
+
 // ── Konfiguration ────────────────────────────────────────────────────────────
+
+/** Ein Ausschnitt des Cache-Index für den Bild-Browser (E-25). */
+export const imagePage = (
+  offset: number,
+  limit: number,
+  filter: ImageFilter,
+): Promise<ImagePage> => invoke('image_page', { offset, limit, filter })
+
+/**
+ * Meldet dem Backend, wie der Rahmen gerade hängt (E-26).
+ *
+ * Nötig nur bei `orientation: 'auto'` — dann weiß allein die Oberfläche, was
+ * der Lagesensor ergeben hat. Wirkt sich ausschließlich auf die Paarbildung
+ * aus (FA-08).
+ */
+export const setFrameOrientation = (portrait: boolean): Promise<void> =>
+  invoke('set_frame_orientation', { portrait })
+
+/**
+ * Setzt die eingestellte Ausrichtung am Fenster durch (E-26).
+ *
+ * Muss vom Frontend kommen: Tauris `setup()` läuft auf einem eigenen Thread und
+ * kann die JNI-Brücke noch nicht erreichen. Steht die WebView, steht sie.
+ */
+export const applyOrientation = (): Promise<void> => invoke('apply_orientation')
 
 export const getConfig = (): Promise<AppConfig> => invoke('get_config')
 
@@ -70,7 +117,6 @@ export const excludeImage = (id: string): Promise<void> => invoke('exclude_image
 
 export const includeImage = (id: string): Promise<void> => invoke('include_image', { id })
 
-export const excludedImages = (): Promise<CacheEntry[]> => invoke('excluded_images')
 
 // ── Cache und Quellen ────────────────────────────────────────────────────────
 

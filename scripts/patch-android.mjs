@@ -20,7 +20,14 @@
 // Fehler — so lässt sich `npm run android:build` auch auf einem frischen
 // Rechner ohne vorheriges `init` aufrufen.
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -37,10 +44,22 @@ if (!existsSync(genDir)) {
 
 // ── 1. MainActivity ──────────────────────────────────────────────────────────
 
-const activityTarget = resolve(genDir, `app/src/main/java/${PACKAGE_PATH}/MainActivity.kt`)
-mkdirSync(dirname(activityTarget), { recursive: true })
-copyFileSync(resolve(srcDir, 'MainActivity.kt'), activityTarget)
-console.log('MainActivity.kt eingespielt (FA-01, FA-50, FA-53)')
+// Alle Kotlin-Dateien, nicht nur die MainActivity: mit dem Vordergrunddienst
+// (E-24) gibt es eine zweite, und eine namentliche Liste hier waere die Art
+// Stelle, die man beim Hinzufuegen der dritten vergisst.
+const javaDir = resolve(genDir, `app/src/main/java/${PACKAGE_PATH}`)
+mkdirSync(javaDir, { recursive: true })
+
+const kotlinFiles = readdirSync(srcDir).filter((f) => f.endsWith('.kt'))
+if (kotlinFiles.length === 0) {
+  console.error('Keine .kt-Datei in src-tauri/android-src/ gefunden.')
+  process.exit(1)
+}
+for (const file of kotlinFiles) {
+  copyFileSync(resolve(srcDir, file), resolve(javaDir, file))
+}
+const activityTarget = resolve(javaDir, 'MainActivity.kt')
+console.log(`${kotlinFiles.length} Kotlin-Datei(en) eingespielt: ${kotlinFiles.join(', ')}`)
 
 // ── 2. AndroidManifest ───────────────────────────────────────────────────────
 
@@ -79,6 +98,36 @@ function ensureElement(xml, element) {
   return xml.replace('</manifest>', `    ${element}\n</manifest>`)
 }
 
+/**
+ * Liest die vollstaendigen `<service>`-Bloecke aus der Vorlage.
+ *
+ * Anders als Rechte und Merkmale sind das keine leeren Elemente: der
+ * Vordergrunddienst traegt eine `<property>` mit der Begruendung fuer
+ * `specialUse` (E-24), die mitkopiert werden muss.
+ */
+function extractServices(source) {
+  const block = source.match(/<services>([\s\S]*?)<\/services>/)
+  if (!block) return []
+  return block[1].match(/<service[\s\S]*?<\/service>/g) ?? []
+}
+
+/**
+ * Fuegt einen Dienst in `<application>` ein, falls er noch fehlt.
+ *
+ * Vor `</application>` und nicht vor `</manifest>`: ein `<service>` ausserhalb
+ * von `<application>` laesst Gradle den Build mit einer Meldung abbrechen, die
+ * nicht auf dieses Skript zeigt.
+ */
+function ensureService(xml, service) {
+  const nameMatch = service.match(/android:name="([^"]+)"/)
+  if (nameMatch && xml.includes(`android:name="${nameMatch[1]}"`)) return xml
+  const indented = service
+    .split(/\r?\n/)
+    .map((line) => (line.trim() ? `        ${line.trim()}` : line))
+    .join('\n')
+  return xml.replace('</application>', `${indented}\n    </application>`)
+}
+
 /** Setzt oder ersetzt ein Attribut im angegebenen Start-Tag. */
 function setAttribute(xml, tagName, attr, value) {
   const tagPattern = new RegExp(`<${tagName}\\b[^>]*>`)
@@ -108,18 +157,89 @@ for (const { name, value } of extractAttributes(additions, 'application-attribut
 for (const { name, value } of extractAttributes(additions, 'activity-attributes')) {
   manifest = setAttribute(manifest, 'activity', name, value)
 }
+for (const service of extractServices(additions)) {
+  manifest = ensureService(manifest, service)
+}
 
 writeFileSync(manifestPath, manifest, 'utf8')
 console.log('AndroidManifest.xml ergänzt (Rechte, Querformat, kein Backup)')
 
-// ── 3. Kontrolle ─────────────────────────────────────────────────────────────
+// ── 3. App-Icon ──────────────────────────────────────────────────────────────
+//
+// `tauri icon` legt den fertigen Android-Satz unter src-tauri/icons/android/ ab,
+// aber `tauri android init` ueberschreibt gen/.../res/ mit Tauris Standardlogo.
+// Wer nur `tauri icon` laufen laesst, hat deshalb weiterhin das Tauri-Logo auf
+// dem Geraet -- genau so ist es hier passiert und erst am Startbildschirm
+// aufgefallen. Also gehoert auch das Icon in dieses Skript.
+
+const iconSrc = resolve(root, 'src-tauri/icons/android')
+const resDir = resolve(genDir, 'app/src/main/res')
+
+/** Kopiert einen Verzeichnisbaum rekursiv. */
+function copyTree(from, to) {
+  let count = 0
+  for (const item of readdirSync(from, { withFileTypes: true })) {
+    const src = resolve(from, item.name)
+    const dst = resolve(to, item.name)
+    if (item.isDirectory()) {
+      mkdirSync(dst, { recursive: true })
+      count += copyTree(src, dst)
+    } else {
+      mkdirSync(dirname(dst), { recursive: true })
+      copyFileSync(src, dst)
+      count++
+    }
+  }
+  return count
+}
+
+if (existsSync(iconSrc)) {
+  const copied = copyTree(iconSrc, resDir)
+
+  // Die Hintergrundfarbe des adaptiven Icons schreibt dieses Skript selbst,
+  // statt sie mitzukopieren: `tauri icon` setzt #fff, der Entwurf verlangt
+  // Tiefschwarz (E-13). Eine von Hand korrigierte Datei waere beim naechsten
+  // `npm run icons` wieder weiss.
+  const background = resolve(resDir, 'values/ic_launcher_background.xml')
+  mkdirSync(dirname(background), { recursive: true })
+  writeFileSync(
+    background,
+    [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      '<!-- Erzeugt von scripts/patch-android.mjs. Farbe aus E-13. -->',
+      '<resources>',
+      '  <color name="ic_launcher_background">#0A0A0A</color>',
+      '</resources>',
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+  console.log(`App-Icon eingespielt (${copied} Dateien, Hintergrund #0A0A0A)`)
+} else {
+  console.warn('src-tauri/icons/android/ fehlt — einmalig `npm run icons` ausfuehren')
+}
+
+// ── 4. Kontrolle ─────────────────────────────────────────────────────────────
 
 const checks = [
   ['android.permission.INTERNET', 'Netzzugriff für FA-21/FA-23'],
   ['REQUEST_IGNORE_BATTERY_OPTIMIZATIONS', 'Akku-Ausnahme für R-04'],
   ['android:allowBackup="false"', 'kein Cloud-Backup der Zugangsdaten (NF-05)'],
   ['sensorLandscape', 'Querformat (RB-02)'],
+  ['FOREGROUND_SERVICE_SPECIAL_USE', 'Vordergrunddienst (NF-01, E-24)'],
+  ['.SlowshowService', 'Dienst in <application> eingetragen (E-24)'],
 ]
+
+// Gegenprobe fuers Icon: liegt in gen/ noch Tauris Standardlogo, faellt das
+// sonst erst auf dem Startbildschirm des Geraets auf.
+const launcher = resolve(resDir, 'mipmap-xxxhdpi/ic_launcher.png')
+if (existsSync(launcher) && existsSync(iconSrc)) {
+  const own = readFileSync(resolve(iconSrc, 'mipmap-xxxhdpi/ic_launcher.png'))
+  if (!readFileSync(launcher).equals(own)) {
+    console.error('App-Icon in gen/ weicht von src-tauri/icons/android/ ab.')
+    process.exit(1)
+  }
+}
 
 let missing = 0
 for (const [needle, why] of checks) {

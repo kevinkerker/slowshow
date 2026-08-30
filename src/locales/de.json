@@ -5,6 +5,7 @@
   },
   "nav": {
     "sources": "Quellen",
+    "images": "Bilder",
     "show": "Diashow",
     "schedule": "Zeitplan",
     "system": "System",
@@ -23,6 +24,23 @@
   },
   "night": {
     "restUntil": "Ruhemodus bis {time}"
+  },
+  "orientation": {
+    "landscape": "Quer",
+    "portrait": "Hoch",
+    "auto": "Automatisch"
+  },
+  "images": {
+    "count": "{n} Bilder",
+    "empty": "Noch keine Bilder im Cache.",
+    "hidden": "aus",
+    "loading": "Lade …",
+    "allLoaded": "Alle Bilder geladen · {bytes} Vorschau",
+    "filter": {
+      "all": "Alle",
+      "included": "In der Diashow",
+      "excluded": "Ausgeblendet"
+    }
   },
   "clock": {
     "digital": "Ziffern",
@@ -113,6 +131,8 @@
     "orderFileName": "Dateiname",
     "orderTakenAt": "Aufnahmedatum",
     "orderModified": "Änderungsdatum",
+    "orientation": "Ausrichtung",
+    "orientationHint": "Wie der Rahmen hängt. \"Automatisch\" folgt dem Lagesensor.",
     "fitMode": "Bildanpassung",
     "fitContain": "Einpassen",
     "fitContainHint": "Das ganze Bild bleibt sichtbar",
@@ -124,6 +144,7 @@
     "kenBurnsHint": "Wirkt lebendiger, kostet etwas mehr Rechenleistung.",
     "pairMode": "Hochformat paarweise zeigen",
     "pairModeHint": "Zwei Hochformatfotos nebeneinander auf dem Querformat-Display.",
+    "pairModeHintPortrait": "Hochkant umgekehrt: zwei Querformatfotos übereinander.",
     "overlays": "Einblendungen",
     "showClock": "Uhrzeit",
     "clockStyle": "Darstellung der Uhr",

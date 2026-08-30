@@ -5,6 +5,7 @@
   },
   "nav": {
     "sources": "Sources",
+    "images": "Photos",
     "show": "Slideshow",
     "schedule": "Schedule",
     "system": "System",
@@ -23,6 +24,23 @@
   },
   "night": {
     "restUntil": "Resting until {time}"
+  },
+  "orientation": {
+    "landscape": "Landscape",
+    "portrait": "Portrait",
+    "auto": "Automatic"
+  },
+  "images": {
+    "count": "{n} photos",
+    "empty": "No photos in the cache yet.",
+    "hidden": "off",
+    "loading": "Loading …",
+    "allLoaded": "All photos loaded · {bytes} of previews",
+    "filter": {
+      "all": "All",
+      "included": "In the slideshow",
+      "excluded": "Hidden"
+    }
   },
   "clock": {
     "digital": "Digits",
@@ -113,6 +131,8 @@
     "orderFileName": "File name",
     "orderTakenAt": "Date taken",
     "orderModified": "Date modified",
+    "orientation": "Orientation",
+    "orientationHint": "How the frame is mounted. \"Automatic\" follows the sensor.",
     "fitMode": "Image fit",
     "fitContain": "Fit",
     "fitContainHint": "The whole photo stays visible",
@@ -124,6 +144,7 @@
     "kenBurnsHint": "Feels more alive, costs a little more processing.",
     "pairMode": "Show portraits in pairs",
     "pairModeHint": "Two portrait photos side by side on the landscape display.",
+    "pairModeHintPortrait": "Portrait reverses it: two landscape photos stacked.",
     "overlays": "Overlays",
     "showClock": "Clock",
     "clockStyle": "Clock face",

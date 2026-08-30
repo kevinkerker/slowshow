@@ -46,6 +46,14 @@ pub struct CacheEntry {
     /// Aus der Diashow entfernt, ohne an der Quelle zu löschen (FA-30).
     #[serde(default)]
     pub excluded: bool,
+    /// Größe des Vorschaubilds, sobald eines erzeugt wurde (E-25).
+    ///
+    /// `None` heißt „noch keins" — Vorschaubilder entstehen beim ersten
+    /// Betrachten im Bild-Browser, nicht beim Synchronisieren. Der Wert geht in
+    /// die Cachegröße ein, damit die Anzeige in den Einstellungen nicht
+    /// systematisch zu klein ist.
+    #[serde(default)]
+    pub thumb_bytes: Option<u64>,
 }
 
 impl CacheEntry {
@@ -134,6 +142,12 @@ impl CacheIndex {
         self.entries.get(id)
     }
 
+    /// Veränderbarer Zugriff — gebraucht, um die Größe eines nachträglich
+    /// erzeugten Vorschaubilds nachzutragen (E-25).
+    pub fn get_mut(&mut self, id: &str) -> Option<&mut CacheEntry> {
+        self.entries.get_mut(id)
+    }
+
     pub fn by_source_path(&self, source_id: &str, rel_path: &str) -> Option<&CacheEntry> {
         let id = self.by_key.get(&key_of(source_id, rel_path))?;
         self.entries.get(id)
@@ -146,6 +160,15 @@ impl CacheIndex {
     /// Summe aller Cache-Dateien in Bytes — Vergleichswert für FA-27.
     pub fn total_bytes(&self) -> u64 {
         self.entries.values().map(|e| e.bytes).sum()
+    }
+
+    /// Summe der bereits erzeugten Vorschaubilder (E-25).
+    ///
+    /// Getrennt von [`Self::total_bytes`], weil der Ringpuffer (FA-27) über die
+    /// Bilddateien verdrängt: flösse die Vorschau in denselben Wert ein, würde
+    /// der Puffer früher verdrängen, als die Cachegröße es hergibt.
+    pub fn thumb_bytes(&self) -> u64 {
+        self.entries.values().filter_map(|e| e.thumb_bytes).sum()
     }
 
     pub fn count_for_source(&self, source_id: &str) -> usize {
@@ -319,6 +342,7 @@ mod tests {
             added_at: added,
             last_shown: None,
             excluded: false,
+            thumb_bytes: None,
         }
     }
 

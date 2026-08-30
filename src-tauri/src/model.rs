@@ -34,6 +34,23 @@ pub enum FitMode {
     Cover,
 }
 
+/// Ausrichtung des Rahmens (E-26).
+///
+/// Als Einstellung und nicht über den Lagesensor: ein fest an die Wand
+/// geschraubter Rahmen wird einmal ausgerichtet und soll danach nie wieder
+/// drehen — auch nicht, wenn jemand ihn beim Putzen anstößt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Orientation {
+    /// Querformat, wie im Design-Canvas (E-13).
+    #[default]
+    Landscape,
+    /// Hochkant montiert.
+    Portrait,
+    /// Dem Lagesensor folgen.
+    Auto,
+}
+
 /// Darstellung der Uhr (E-20).
 ///
 /// Gilt getrennt für die Einblendung über dem Foto (FA-07) und für den
@@ -283,6 +300,9 @@ pub struct AppConfig {
     /// Einstellungen erst nach langem Druck erreichbar (FA-43).
     #[serde(default = "default_true")]
     pub protect_settings: bool,
+    /// Ausrichtung des Rahmens (E-26).
+    #[serde(default)]
+    pub orientation: Orientation,
     /// Oberflächensprache: "auto" | "de" | "en" (NF-09).
     #[serde(default = "default_language")]
     pub language: String,
@@ -318,6 +338,7 @@ impl Default for AppConfig {
             pair_mode: false,
             ken_burns: false,
             protect_settings: true,
+            orientation: Orientation::default(),
             language: default_language(),
             sources: Vec::new(),
         }

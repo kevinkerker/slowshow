@@ -46,6 +46,10 @@ pub fn status(app: &AppHandle) -> Value {
         // annimmt, und ein Regler soll ohnehin den Wert zeigen, den er stellt.
         "brightness": config.brightness.level,
         "deviceBrightness": config.brightness.device_controlled,
+        // `null`, solange die JNI-Brücke nicht steht oder das Gerät nichts
+        // meldet — Home Assistant zeigt die Entität dann als nicht verfügbar,
+        // statt einen erfundenen Wert anzuzeigen (E-23).
+        "battery": crate::battery::read(),
         "display": display,
         "currentSlide": state.current_slide(),
         "cache": stats,

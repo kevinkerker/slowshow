@@ -11,6 +11,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useConfigStore } from '@/stores/config'
 import { keepAwake, releaseAwake } from '@/lib/wake'
 import { dimOpacity as computeDim } from '@/lib/dim'
+import { applyOrientation, setFrameOrientation } from '@/lib/api'
 
 const store = useConfigStore()
 const loaded = ref(false)
@@ -27,13 +28,33 @@ const loaded = ref(false)
  */
 const dimOpacity = computed(() => computeDim(store.display ?? null))
 
+/**
+ * Meldet die tatsächliche Ausrichtung ans Backend (E-26).
+ *
+ * Die Einstellung allein genügt nicht: bei „automatisch" bestimmt der
+ * Lagesensor, und nur die WebView sieht das Ergebnis. Das Backend braucht es
+ * für die Paarbildung (FA-08) — hochkant werden Querformate gepaart statt
+ * Hochformate.
+ */
+const portraitQuery = window.matchMedia('(orientation: portrait)')
+
+function reportOrientation() {
+  void setFrameOrientation(portraitQuery.matches)
+}
+
 onMounted(async () => {
   await store.load()
   loaded.value = true
+  // Erst die eingestellte Ausrichtung durchsetzen, dann melden, was dabei
+  // herauskam — in der anderen Reihenfolge meldeten wir die alte Lage.
+  await applyOrientation()
+  reportOrientation()
+  portraitQuery.addEventListener('change', reportOrientation)
   await keepAwake()
 })
 
 onBeforeUnmount(async () => {
+  portraitQuery.removeEventListener('change', reportOrientation)
   store.dispose()
   await releaseAwake()
 })

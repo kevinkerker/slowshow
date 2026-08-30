@@ -16,6 +16,8 @@
 //! | `remote`    | Heimnetz-Steuerung per REST                    | FA-55              |
 //! | `commands`  | Schnittstelle zum Frontend                     | —                  |
 
+pub mod android_bridge;
+pub mod battery;
 pub mod brightness;
 pub mod cache;
 pub mod commands;
@@ -24,6 +26,7 @@ pub mod control;
 pub mod decode;
 pub mod model;
 pub mod mqtt;
+pub mod orientation;
 pub mod playlist;
 pub mod remote;
 pub mod schedule;
@@ -92,7 +95,9 @@ pub fn run() {
             commands::image_info,
             commands::exclude_image,
             commands::include_image,
-            commands::excluded_images,
+            commands::image_page,
+            commands::set_frame_orientation,
+            commands::apply_orientation,
             commands::cache_stats,
             commands::source_counts,
             commands::add_source,
@@ -129,6 +134,15 @@ pub fn run() {
 
             let state = AppState::new(&data_dir)?;
             app.manage(state);
+
+            // Die Ausrichtung (E-26) wird hier bewusst *nicht* gesetzt.
+            //
+            // `_start_app` läuft auf einem eigenen Thread, `onCreate` kehrt
+            // sofort zurück, und `nativeRegisterActivity` rennt damit gegen
+            // dieses `setup`. Ein Aufruf an dieser Stelle trifft die JNI-Brücke
+            // mal und mal nicht — am Gerät gemessen: er lief ins Leere. Das
+            // Frontend ruft `apply_orientation`, sobald die WebView steht; dann
+            // ist die Brücke sicher da.
             app.manage(RemoteServer::default());
             app.manage(MqttService::default());
 
@@ -170,6 +184,12 @@ pub fn run() {
 ///
 /// Die Id wird vom Cache gegen den Index geprüft; eine manipulierte URL kann
 /// deshalb keine beliebige Datei vom Gerät ausliefern.
+/// Präfix, an dem das Asset-Protokoll ein Vorschaubild erkennt (E-25).
+///
+/// Muss mit `THUMB_PREFIX` in `src/lib/api.ts` übereinstimmen; die Grenze
+/// prüft kein Compiler.
+pub const THUMB_PREFIX: &str = "t_";
+
 fn serve_image(
     app: &tauri::AppHandle,
     request: tauri::http::Request<Vec<u8>>,
@@ -182,16 +202,38 @@ fn serve_image(
     };
 
     let path = request.uri().path();
-    let Some(id) = path.rsplit('/').next().filter(|s| !s.is_empty()) else {
+    let Some(name) = path.rsplit('/').next().filter(|s| !s.is_empty()) else {
         return not_found();
     };
 
+    // Vorschaubilder tragen ein Präfix statt eines eigenen Pfadsegments (E-25).
+    //
+    // `convertFileSrc` steckt die Id per `encodeURIComponent` in *ein* Segment;
+    // aus `thumb/<id>` würde `thumb%2F<id>`, und ein Aufteilen am Schrägstrich
+    // ginge ins Leere. Ein Präfix aus Buchstabe und Unterstrich übersteht die
+    // Kodierung unverändert und kann mit keiner Id kollidieren, weil Ids
+    // hexadezimal sind.
+    let (want_thumb, id) = match name.strip_prefix(THUMB_PREFIX) {
+        Some(rest) => (true, rest),
+        None => (false, name),
+    };
+    if id.is_empty() {
+        return not_found();
+    }
+
     let state = app.state::<AppState>();
-    let Ok(cache) = state.cache.lock() else {
+    let Ok(mut cache) = state.cache.lock() else {
         return not_found();
     };
-    let Some(bytes) = cache.read_image(id) else {
-        log::debug!("Bild nicht im Cache: {id}");
+    let bytes = if want_thumb {
+        // Braucht `&mut`, weil die Größe des erzeugten Vorschaubilds in den
+        // Index nachgetragen wird.
+        cache.read_or_make_thumb(id)
+    } else {
+        cache.read_image(id)
+    };
+    let Some(bytes) = bytes else {
+        log::debug!("Nicht im Cache: {name}");
         return not_found();
     };
 

@@ -34,6 +34,12 @@ pub struct CacheStats {
     pub max_bytes: u64,
     /// Wie viele Bilder aktuell aus der Diashow ausgeschlossen sind (FA-30).
     pub excluded: usize,
+    /// Belegung durch Vorschaubilder (E-25), getrennt ausgewiesen.
+    ///
+    /// Ohne diese Zahl wäre die Cachegröße in den Einstellungen systematisch zu
+    /// klein: bei 5 000 Bildern kommen gut 100 MB Vorschau dazu, die auf dem
+    /// Gerät liegen, aber in `bytes` nicht auftauchen.
+    pub thumb_bytes: u64,
 }
 
 pub struct Cache {
@@ -56,6 +62,9 @@ impl Cache {
     pub fn open(root: impl AsRef<Path>) -> Result<Self, CacheError> {
         let root = root.as_ref().to_path_buf();
         std::fs::create_dir_all(root.join("images"))?;
+        // Vorschaubilder liegen getrennt, damit `drop_entries_without_file`
+        // und der Ringpuffer weiterhin nur über die Bilddateien laufen (E-25).
+        std::fs::create_dir_all(root.join("thumbs"))?;
 
         let index_path = root.join("index.json");
         let mut index = match std::fs::read(&index_path) {
@@ -109,6 +118,56 @@ impl Cache {
         self.root.join("images").join(format!("{id}.jpg"))
     }
 
+    /// Pfad des Vorschaubilds zu einer Id (E-25). Wie [`Self::image_path`]
+    /// ausschließlich hier gebildet.
+    pub fn thumb_path(&self, id: &str) -> PathBuf {
+        self.root.join("thumbs").join(format!("{id}.jpg"))
+    }
+
+    /// Liefert das Vorschaubild und erzeugt es beim ersten Zugriff (E-25).
+    ///
+    /// Erzeugt statt beim Synchronisieren: ein Cache mit 5 000 Bildern hätte
+    /// sonst einen mehrminütigen Nachziehlauf beim ersten Start nach dem
+    /// Update. So entsteht jedes Vorschaubild erst, wenn der Browser die Seite
+    /// anfordert, in der es liegt.
+    ///
+    /// Am Gerät gemessen: das Öffnen des Browsers erzeugt die Vorschau für die
+    /// gesamte geladene Seite von 200 Einträgen, nicht nur für die sichtbaren
+    /// Zellen — Chromiums `loading="lazy"` greift bei den kurzen Kacheln
+    /// grosszügiger, als die Sichtbarkeit vermuten lässt. 200 Stück wogen
+    /// 4,2 MB und waren ohne merkliche Verzögerung da.
+    ///
+    /// Der Rückgabewert ist `None`, wenn die Id unbekannt ist oder das
+    /// Cache-Bild fehlt; das Frontend zeigt dann einen Platzhalter statt eines
+    /// kaputten Bildes.
+    pub fn read_or_make_thumb(&mut self, id: &str) -> Option<Vec<u8>> {
+        self.index.get(id)?;
+
+        if let Ok(bytes) = std::fs::read(self.thumb_path(id)) {
+            return Some(bytes);
+        }
+
+        let full = std::fs::read(self.image_path(id)).ok()?;
+        let thumb = match crate::decode::thumbnail(&full, crate::decode::THUMB_EDGE) {
+            Ok(t) => t,
+            Err(e) => {
+                log::warn!("Vorschaubild für {id} nicht erzeugbar: {e}");
+                return None;
+            }
+        };
+
+        if let Err(e) = write_atomic(&self.thumb_path(id), &thumb) {
+            // Nicht schreibbar ist kein Grund, nichts zu liefern — dann wird es
+            // beim nächsten Mal eben neu berechnet.
+            log::warn!("Vorschaubild für {id} nicht schreibbar: {e}");
+        } else if let Some(entry) = self.index.get_mut(id) {
+            entry.thumb_bytes = Some(thumb.len() as u64);
+            self.dirty = true;
+        }
+
+        Some(thumb)
+    }
+
     /// Liest eine Cache-Datei. Wird vom Asset-Protokoll bedient.
     ///
     /// Die Id wird gegen den Index geprüft — damit kann eine manipulierte URL
@@ -158,6 +217,8 @@ impl Cache {
             added_at: now,
             last_shown,
             excluded,
+            // Das alte Vorschaubild passt nicht mehr zum neuen Inhalt.
+            thumb_bytes: None,
         };
         self.index.insert(entry.clone());
         self.dirty = true;
@@ -168,6 +229,9 @@ impl Cache {
     pub fn remove(&mut self, id: &str) {
         if self.index.remove(id).is_some() {
             let _ = std::fs::remove_file(self.image_path(id));
+            // Ohne das blieben Vorschaubilder als Waisen liegen — unsichtbar,
+            // weil `drop_entries_without_file` nur die Bilddateien prüft.
+            let _ = std::fs::remove_file(self.thumb_path(id));
             self.dirty = true;
         }
     }
@@ -226,6 +290,7 @@ impl Cache {
             bytes: self.index.total_bytes(),
             max_bytes,
             excluded: self.index.values().filter(|e| e.excluded).count(),
+            thumb_bytes: self.index.thumb_bytes(),
         }
     }
 
@@ -290,6 +355,124 @@ mod tests {
             height: 1080,
             taken_at: Some(1700),
         }
+    }
+
+    /// Echtes JPEG — `prepared()` liefert Fuellbytes, aus denen sich kein
+    /// Vorschaubild dekodieren laesst.
+    fn real_prepared(w: u32, h: u32) -> Prepared {
+        use image::{ImageEncoder, Rgb, RgbImage};
+        let mut img = RgbImage::new(w, h);
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            *p = Rgb([(x % 256) as u8, (y % 256) as u8, 64]);
+        }
+        let mut bytes = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 85)
+            .write_image(img.as_raw(), w, h, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        Prepared {
+            bytes,
+            width: w,
+            height: h,
+            taken_at: Some(1700),
+        }
+    }
+
+    #[test]
+    fn vorschaubild_entsteht_beim_ersten_zugriff_e_25() {
+        let dir = TempDir::new("thumb-lazy");
+        let mut cache = Cache::open(dir.path()).unwrap();
+        let entry = cache
+            .store("s1", "a.jpg", "a.jpg", real_prepared(800, 600), None, None, None, 100)
+            .unwrap();
+
+        // Beim Ablegen entsteht bewusst noch keines: ein Nachziehlauf ueber
+        // 5 000 Bilder beim ersten Start nach dem Update waere minutenlang.
+        assert!(!cache.thumb_path(&entry.id).exists());
+        assert_eq!(cache.index().get(&entry.id).unwrap().thumb_bytes, None);
+
+        let thumb = cache.read_or_make_thumb(&entry.id).expect("Vorschaubild");
+        assert!(!thumb.is_empty());
+        assert!(cache.thumb_path(&entry.id).exists());
+        assert_eq!(
+            cache.index().get(&entry.id).unwrap().thumb_bytes,
+            Some(thumb.len() as u64),
+            "Groesse wird im Index vermerkt, sonst fehlt sie in der Cachegroesse"
+        );
+    }
+
+    #[test]
+    fn vorschaubild_wird_beim_zweiten_zugriff_gelesen_e_25() {
+        let dir = TempDir::new("thumb-cached");
+        let mut cache = Cache::open(dir.path()).unwrap();
+        let entry = cache
+            .store("s1", "a.jpg", "a.jpg", real_prepared(800, 600), None, None, None, 100)
+            .unwrap();
+
+        let first = cache.read_or_make_thumb(&entry.id).unwrap();
+        // Die Bilddatei loeschen: waere der zweite Aufruf eine Neuberechnung,
+        // ginge er jetzt schief.
+        std::fs::remove_file(cache.image_path(&entry.id)).unwrap();
+        let second = cache.read_or_make_thumb(&entry.id).expect("aus der Datei");
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn remove_raeumt_das_vorschaubild_mit_weg_e_25() {
+        let dir = TempDir::new("thumb-remove");
+        let mut cache = Cache::open(dir.path()).unwrap();
+        let entry = cache
+            .store("s1", "a.jpg", "a.jpg", real_prepared(400, 300), None, None, None, 100)
+            .unwrap();
+        cache.read_or_make_thumb(&entry.id).unwrap();
+        let thumb = cache.thumb_path(&entry.id);
+        assert!(thumb.exists());
+
+        cache.remove(&entry.id);
+        assert!(
+            !thumb.exists(),
+            "sonst bleiben Waisen liegen -- drop_entries_without_file prueft nur Bilddateien"
+        );
+    }
+
+    #[test]
+    fn vorschaubild_zaehlt_in_die_cachegroesse_e_25() {
+        let dir = TempDir::new("thumb-stats");
+        let mut cache = Cache::open(dir.path()).unwrap();
+        let entry = cache
+            .store("s1", "a.jpg", "a.jpg", real_prepared(800, 600), None, None, None, 100)
+            .unwrap();
+
+        assert_eq!(cache.stats(1000).thumb_bytes, 0);
+        let thumb = cache.read_or_make_thumb(&entry.id).unwrap();
+        assert_eq!(cache.stats(1000).thumb_bytes, thumb.len() as u64);
+    }
+
+    #[test]
+    fn unbekannte_id_liefert_kein_vorschaubild() {
+        // Das Asset-Protokoll reicht Ids aus der WebView durch. Ohne die
+        // Indexpruefung koennte eine manipulierte URL Dateien ausserhalb des
+        // Caches erreichen.
+        let dir = TempDir::new("thumb-unknown");
+        let mut cache = Cache::open(dir.path()).unwrap();
+        assert_eq!(cache.read_or_make_thumb("../../etc/passwd"), None);
+        assert_eq!(cache.read_or_make_thumb("gibtsnicht"), None);
+    }
+
+    #[test]
+    fn store_verwirft_das_alte_vorschaubild_e_25() {
+        // Nach einem Update an der Quelle passt die alte Vorschau nicht mehr.
+        let dir = TempDir::new("thumb-replace");
+        let mut cache = Cache::open(dir.path()).unwrap();
+        let entry = cache
+            .store("s1", "a.jpg", "a.jpg", real_prepared(800, 600), None, None, None, 100)
+            .unwrap();
+        cache.read_or_make_thumb(&entry.id).unwrap();
+        assert!(cache.index().get(&entry.id).unwrap().thumb_bytes.is_some());
+
+        let again = cache
+            .store("s1", "a.jpg", "a.jpg", real_prepared(400, 300), None, None, None, 200)
+            .unwrap();
+        assert_eq!(again.thumb_bytes, None);
     }
 
     #[test]

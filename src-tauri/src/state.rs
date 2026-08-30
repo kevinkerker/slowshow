@@ -9,7 +9,7 @@
 
 use crate::cache::Cache;
 use crate::config::ConfigStore;
-use crate::model::{AppConfig, Source};
+use crate::model::{AppConfig, Orientation, Source};
 use crate::playlist::{build_order, Playlist, Slide};
 use crate::schedule::{self, DisplayState};
 use crate::secrets::{FileKeyProvider, SecretStore};
@@ -44,6 +44,12 @@ pub struct AppState {
     playing: AtomicBool,
     /// Verhindert überlappende Sync-Läufe.
     syncing: AtomicBool,
+    /// Hängt der Rahmen hochkant? (E-26)
+    ///
+    /// Beeinflusst nur die Paarbildung (FA-08). Die Einstellung liefert den
+    /// Ausgangswert; bei `Orientation::Auto` kann nur die Oberfläche wissen,
+    /// wie das Gerät gerade liegt, und meldet es über `set_frame_orientation`.
+    frame_portrait: AtomicBool,
 }
 
 impl AppState {
@@ -60,6 +66,9 @@ impl AppState {
         let secrets = SecretStore::open(data_dir, &FileKeyProvider::new(data_dir))
             .map_err(|e| e.to_string())?;
 
+        // Vor dem Verschieben in den Mutex ablesen.
+        let starts_portrait = config.orientation == Orientation::Portrait;
+
         let state = Self {
             config: Mutex::new(config),
             cache: Mutex::new(cache),
@@ -67,6 +76,7 @@ impl AppState {
             playlist: Mutex::new(Playlist::new()),
             config_store,
             playing: AtomicBool::new(true),
+            frame_portrait: AtomicBool::new(starts_portrait),
             syncing: AtomicBool::new(false),
         };
         state.rebuild_playlist();
@@ -113,6 +123,15 @@ impl AppState {
 
     pub fn is_playing(&self) -> bool {
         self.playing.load(Ordering::Relaxed)
+    }
+
+    /// Wie der Rahmen gerade hängt (E-26).
+    pub fn frame_portrait(&self) -> bool {
+        self.frame_portrait.load(Ordering::Relaxed)
+    }
+
+    pub fn set_frame_portrait(&self, portrait: bool) {
+        self.frame_portrait.store(portrait, Ordering::Relaxed);
     }
 
     pub fn set_playing(&self, playing: bool) {
@@ -175,8 +194,12 @@ impl AppState {
 
     pub fn current_slide(&self) -> Option<Slide> {
         let pair_mode = self.config_snapshot().pair_mode;
+        let portrait = self.frame_portrait();
         let cache = self.cache.lock().ok()?;
-        self.playlist.lock().ok()?.current(pair_mode, cache.index())
+        self.playlist
+            .lock()
+            .ok()?
+            .current(pair_mode, portrait, cache.index())
     }
 
     /// Schaltet weiter und merkt die Anzeige für den Ringpuffer (FA-27).
@@ -190,15 +213,16 @@ impl AppState {
 
     fn step(&self, forward: bool) -> Option<Slide> {
         let pair_mode = self.config_snapshot().pair_mode;
+        let portrait = self.frame_portrait();
         let now = now_ts();
 
         let slide = {
             let cache = self.cache.lock().ok()?;
             let mut pl = self.playlist.lock().ok()?;
             if forward {
-                pl.advance(pair_mode, cache.index(), random_seed())
+                pl.advance(pair_mode, portrait, cache.index(), random_seed())
             } else {
-                pl.back(pair_mode, cache.index())
+                pl.back(pair_mode, portrait, cache.index())
             }
         }?;
 

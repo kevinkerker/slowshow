@@ -127,6 +127,24 @@ function idsOf(slide: Slide | null): string[] {
   height: 100%;
 }
 
+/* Hochkant montiert kehrt sich das um: zwei Querformatfotos übereinander
+   (E-26). Welche Bilder überhaupt gepaart werden, entscheidet `playlist.rs` —
+   hier steht nur, wie sie liegen.
+
+   Als Seitenverhältnis-Abfrage und nicht über eine Klasse aus der
+   Konfiguration: bei `Orientation::Auto` wäre die Einstellung „automatisch"
+   und sagte nichts darüber aus, wie das Gerät gerade wirklich liegt. */
+@media (orientation: portrait) {
+  .frame.pair {
+    flex-direction: column;
+  }
+
+  .frame.pair .photo {
+    width: 100%;
+    height: 50%;
+  }
+}
+
 .photo {
   width: 100%;
   height: 100%;

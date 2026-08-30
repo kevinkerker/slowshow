@@ -1,129 +1,69 @@
 //! Brücke zur Displayhelligkeit (FA-53).
 //!
-//! Die Frontend-Abdunkelung (schwarzes Overlay in `App.vue`) wirkt überall,
+//! Die Frontend-Abdunkelung (schwarzes Overlay, `lib/dim.ts`) wirkt überall,
 //! senkt aber nur die wahrgenommene Helligkeit — die Hintergrundbeleuchtung
 //! läuft weiter auf voller Leistung. Für den 24/7-Betrieb zählt der
 //! Unterschied: Wärmeentwicklung und Stromverbrauch (NF-06) hängen an der
 //! Beleuchtung, nicht am angezeigten Bild.
 //!
-//! ## Warum die Activity sich selbst anmeldet
-//!
-//! Der naheliegende Weg über `ndk_context::android_context()` funktioniert
-//! hier **nicht**: Tauri initialisiert diesen Kontext nicht, und die Funktion
-//! paniert dann. In einem Release-Build mit `panic = "abort"` würde das die App
-//! beenden — aus einer Hintergrundaufgabe heraus, die nur die Helligkeit
-//! nachziehen wollte.
-//!
-//! Stattdessen ruft `MainActivity.onCreate` einmal
-//! [`Java_dev_kerker_slowshow_MainActivity_nativeRegisterActivity`] auf und
-//! übergibt sich selbst. Von da an ist der Aufruf ein gewöhnlicher
-//! JNI-Methodenaufruf auf eine bekannte Referenz.
-//!
-//! Jeder Fehlerfall — Registrierung nicht erfolgt, Thread nicht anbindbar,
-//! Java-Ausnahme — endet in einem No-op mit Log-Eintrag. Ein Bilderrahmen darf
-//! an der Helligkeitssteuerung nicht scheitern (NF-01); die Abdunkelung im
-//! Frontend bleibt in jedem Fall wirksam.
+//! Der JNI-Unterbau liegt in [`crate::android_bridge`]; hier steht nur noch,
+//! welche Java-Methode mit welchem Wert gerufen wird.
 
-#[cfg(target_os = "android")]
-mod android {
-    use jni::objects::{GlobalRef, JObject, JValue};
-    use jni::{JNIEnv, JavaVM};
-    use std::sync::OnceLock;
-
-    struct Registration {
-        vm: JavaVM,
-        activity: GlobalRef,
-    }
-
-    static ACTIVITY: OnceLock<Registration> = OnceLock::new();
-
-    /// Wird von `MainActivity.onCreate` aufgerufen.
-    ///
-    /// Der Name folgt der JNI-Konvention `Java_<paket>_<klasse>_<methode>`;
-    /// ändert sich der Paketname, muss er hier mitgeändert werden.
-    ///
-    /// # Safety
-    ///
-    /// Wird ausschließlich von der JVM aufgerufen, die gültige Parameter
-    /// garantiert.
-    #[no_mangle]
-    pub extern "system" fn Java_dev_kerker_slowshow_MainActivity_nativeRegisterActivity(
-        env: JNIEnv,
-        activity: JObject,
-    ) {
-        let vm = match env.get_java_vm() {
-            Ok(vm) => vm,
-            Err(e) => {
-                log::warn!("Helligkeit: JavaVM nicht ermittelbar: {e}");
-                return;
-            }
-        };
-        // Globale Referenz: die lokale gilt nur für diesen JNI-Aufruf.
-        let activity = match env.new_global_ref(&activity) {
-            Ok(r) => r,
-            Err(e) => {
-                log::warn!("Helligkeit: Activity nicht referenzierbar: {e}");
-                return;
-            }
-        };
-
-        if ACTIVITY.set(Registration { vm, activity }).is_err() {
-            // Kann bei einem Neustart der Activity vorkommen; die erste
-            // Referenz bleibt gültig, weil es dieselbe Activity-Instanz ist.
-            log::debug!("Helligkeit: bereits registriert");
-        } else {
-            log::info!("Helligkeit: Brücke zur MainActivity steht");
-        }
-    }
-
-    pub fn apply(level: u8) {
-        let Some(reg) = ACTIVITY.get() else {
-            // Vor `onCreate` oder wenn das Laden der Bibliothek fehlschlug.
-            return;
-        };
-
-        let mut env = match reg.vm.attach_current_thread() {
-            Ok(env) => env,
-            Err(e) => {
-                log::warn!("Helligkeit: Thread nicht an die VM gebunden: {e}");
-                return;
-            }
-        };
-
-        // 0 wird durchgereicht statt auf 1 geklemmt: es ist der Sentinel aus
-        // `schedule::DEVICE_CONTROLLED` und weist die Activity an, den
-        // Helligkeits-Override wieder abzugeben (E-22).
-        let value = if level == crate::schedule::DEVICE_CONTROLLED {
-            0
-        } else {
-            level.clamp(1, 100) as i32
-        };
-
-        if let Err(e) = env.call_method(
-            &reg.activity,
-            "setScreenBrightness",
-            "(I)V",
-            &[JValue::Int(value)],
-        ) {
-            log::warn!("Helligkeit: Aufruf fehlgeschlagen: {e}");
-            // Eine geworfene Java-Ausnahme muss gelöscht werden, sonst schlägt
-            // der nächste JNI-Aufruf auf demselben Thread ebenfalls fehl.
-            let _ = env.exception_clear();
-        }
+/// Umrechnung vom Anzeigezustand auf den Wert, den die Activity erwartet.
+///
+/// Als eigene Funktion, damit die Sonderbehandlung der Null ohne Gerät prüfbar
+/// ist: 0 wird durchgereicht statt auf 1 geklemmt: es ist der Sentinel aus
+/// [`schedule::DEVICE_CONTROLLED`](crate::schedule::DEVICE_CONTROLLED) und
+/// weist die Activity an, den Helligkeits-Override abzugeben (E-22).
+pub fn jni_value(level: u8) -> i32 {
+    if level == crate::schedule::DEVICE_CONTROLLED {
+        0
+    } else {
+        level.clamp(1, 100) as i32
     }
 }
 
 /// Setzt die Displayhelligkeit auf `level` Prozent (1..=100).
 ///
-/// [`schedule::DEVICE_CONTROLLED`](crate::schedule::DEVICE_CONTROLLED) gibt die
-/// Regelung an das Gerät zurück, statt eine Helligkeit zu erzwingen (E-22).
-///
 /// Auf allen Plattformen außer Android ein No-op — der Desktop-Build ist
 /// ohnehin kein Abnahmegegenstand (Lastenheft 1.3).
 pub fn apply(level: u8) {
+    let value = jni_value(level);
+
+    // `jni` ist eine Android-Abhängigkeit; ohne das `cfg` bräche der
+    // Desktop-Build, auf dem `cargo test` ohne Emulator läuft.
     #[cfg(target_os = "android")]
-    android::apply(level);
+    crate::android_bridge::with_activity("Helligkeit", |env, activity| {
+        env.call_method(
+            activity,
+            "setScreenBrightness",
+            "(I)V",
+            &[jni::objects::JValue::Int(value)],
+        )
+        .map(|_| ())
+    });
 
     #[cfg(not(target_os = "android"))]
-    let _ = level;
+    let _ = value;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schedule::DEVICE_CONTROLLED;
+
+    #[test]
+    fn geraetesteuerung_reicht_die_null_durch_e_22() {
+        // Auf 1 geklemmt hiesse: die App erzwingt 1 % statt die Regelung
+        // abzugeben. Der Rahmen waere dann dauerhaft fast dunkel.
+        assert_eq!(jni_value(DEVICE_CONTROLLED), 0);
+    }
+
+    #[test]
+    fn helligkeit_bleibt_im_gueltigen_bereich() {
+        assert_eq!(jni_value(1), 1);
+        assert_eq!(jni_value(50), 50);
+        assert_eq!(jni_value(100), 100);
+        assert_eq!(jni_value(200), 100, "oberhalb von 100 wird geklemmt");
+    }
 }
