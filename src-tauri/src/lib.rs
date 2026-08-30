@@ -30,6 +30,7 @@ pub mod orientation;
 pub mod playlist;
 pub mod remote;
 pub mod schedule;
+pub mod scheduler;
 pub mod secrets;
 pub mod sources;
 pub mod state;

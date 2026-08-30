@@ -24,7 +24,7 @@ const cfg = computed(() => store.config)
  */
 const INTERVALS = [5, 10, 15, 30, 60, 120, 300, 600, 1800]
 
-const ORDERS: PlayOrder[] = ['random', 'fileName', 'takenAt', 'modified']
+const ORDERS: PlayOrder[] = ['smart', 'random', 'fileName', 'chronological']
 const FIT_MODES: FitMode[] = ['contain', 'cover']
 const CLOCK_STYLES: ClockStyle[] = ['digital', 'analog']
 const ORIENTATIONS: Orientation[] = ['landscape', 'portrait', 'auto']
@@ -32,10 +32,10 @@ const ORIENTATIONS: Orientation[] = ['landscape', 'portrait', 'auto']
 function orderLabel(order: PlayOrder): string {
   return t(
     {
+      smart: 'show.orderSmart',
       random: 'show.orderRandom',
       fileName: 'show.orderFileName',
-      takenAt: 'show.orderTakenAt',
-      modified: 'show.orderModified',
+      chronological: 'show.orderChronological',
     }[order],
   )
 }
@@ -76,6 +76,48 @@ function orderLabel(order: PlayOrder): string {
             @click="store.patch((d) => (d.orientation = o))"
           >
             {{ t(`orientation.${o}`) }}
+          </button>
+        </div>
+      </SettingRow>
+
+      <!-- Feineinstellungen der Ziehung (E-29). Nur sichtbar, wo sie wirken:
+           ein Schalter, der nichts tut, ist schlimmer als keiner. -->
+      <template v-if="cfg.order === 'smart'">
+        <SettingRow :label="t('show.newBoost')" :hint="t('show.newBoostHint')">
+          <ToggleSwitch
+            :model-value="cfg.playback.newBoost"
+            :label="t('show.newBoost')"
+            @update:model-value="(v) => store.patch((d) => (d.playback.newBoost = v))"
+          />
+        </SettingRow>
+
+        <SettingRow :label="t('show.leastRecentlyShown')">
+          <ToggleSwitch
+            :model-value="cfg.playback.leastRecentlyShown"
+            :label="t('show.leastRecentlyShown')"
+            @update:model-value="(v) => store.patch((d) => (d.playback.leastRecentlyShown = v))"
+          />
+        </SettingRow>
+
+        <SettingRow :label="t('show.clusterFilter')" :hint="t('show.clusterFilterHint')">
+          <ToggleSwitch
+            :model-value="cfg.playback.clusterFilter"
+            :label="t('show.clusterFilter')"
+            @update:model-value="(v) => store.patch((d) => (d.playback.clusterFilter = v))"
+          />
+        </SettingRow>
+      </template>
+
+      <SettingRow v-if="cfg.order === 'chronological'" :label="t('show.direction')">
+        <div class="ss-segmented">
+          <button
+            v-for="newest in [false, true]"
+            :key="String(newest)"
+            class="ss-segment"
+            :class="{ active: cfg.playback.newestFirst === newest }"
+            @click="store.patch((d) => (d.playback.newestFirst = newest))"
+          >
+            {{ newest ? t('show.directionNewest') : t('show.directionOldest') }}
           </button>
         </div>
       </SettingRow>

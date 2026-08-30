@@ -8,19 +8,58 @@ use serde::{Deserialize, Serialize};
 
 // ── Diashow ──────────────────────────────────────────────────────────────────
 
-/// Reihenfolge der Diashow (FA-03).
+/// Reihenfolge der Diashow (FA-03, fortgeschrieben durch E-29).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum PlayOrder {
-    /// Zufällig. Nutzt einen pro Durchlauf neu gezogenen Seed.
+    /// Gewichtete Ziehung aus einer Urne (E-29). Siehe `scheduler.rs`.
     #[default]
+    Smart,
+    /// Zufällig, jedes Bild einmal je Durchlauf.
+    ///
+    /// Umgesetzt als Sortierung nach einem seed-abhängigen Hash statt als
+    /// Urne: das leistet dieselben Garantien — kein Bild zweimal, jedes einmal
+    /// je Durchlauf — und bleibt zusätzlich stabil, wenn während des Laufs
+    /// Bilder dazukommen.
     Random,
     /// Alphabetisch nach Dateiname.
+    ///
+    /// Bleibt entgegen dem Erweiterungspapier erhalten (E-29): bei
+    /// durchnummerierten Scans ist das der einzige Weg zur richtigen Folge.
     FileName,
-    /// Aufnahmedatum (EXIF), Fallback Änderungsdatum.
-    TakenAt,
-    /// Änderungsdatum an der Quelle.
-    Modified,
+    /// Nach Aufnahmedatum, Richtung über [`PlaybackConfig::newest_first`].
+    ///
+    /// Die Aliase heben alte Konfigurationen an: `takenAt` ist dasselbe, und
+    /// `modified` ist entfallen, weil es sich in der Praxis kaum davon
+    /// unterschied. Ohne sie schlüge das Laden fehl und der Nutzer verlöre
+    /// beim Update alle Einstellungen (NF-10).
+    #[serde(alias = "takenAt", alias = "modified")]
+    Chronological,
+}
+
+/// Feineinstellungen der Wiedergabe (E-29).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackConfig {
+    /// Neue Bilder in den ersten 48 Stunden bevorzugen.
+    pub new_boost: bool,
+    /// Lange nicht Gezeigte bevorzugen.
+    pub least_recently_shown: bool,
+    /// Serienaufnahmen nicht direkt hintereinander zeigen.
+    pub cluster_filter: bool,
+    /// Nur für [`PlayOrder::Chronological`]: neueste zuerst statt älteste.
+    pub newest_first: bool,
+}
+
+impl Default for PlaybackConfig {
+    fn default() -> Self {
+        Self {
+            new_boost: true,
+            least_recently_shown: true,
+            cluster_filter: true,
+            newest_first: false,
+        }
+    }
 }
 
 /// Darstellung bei abweichendem Seitenverhältnis (FA-05).
@@ -303,6 +342,9 @@ pub struct AppConfig {
     /// Ausrichtung des Rahmens (E-26).
     #[serde(default)]
     pub orientation: Orientation,
+    /// Feineinstellungen der Wiedergabe (E-29).
+    #[serde(default)]
+    pub playback: PlaybackConfig,
     /// Oberflächensprache: "auto" | "de" | "en" (NF-09).
     #[serde(default = "default_language")]
     pub language: String,
@@ -339,6 +381,7 @@ impl Default for AppConfig {
             ken_burns: false,
             protect_settings: true,
             orientation: Orientation::default(),
+            playback: PlaybackConfig::default(),
             language: default_language(),
             sources: Vec::new(),
         }

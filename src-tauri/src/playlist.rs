@@ -80,10 +80,16 @@ pub fn order_hash(seed: u64, id: &str) -> u64 {
 /// Berücksichtigt nur Bilder aktiver Quellen (FA-25), die nicht ausgeschlossen
 /// sind (FA-30). Sortierungen sind stabil über die Id, damit gleiche
 /// Sortierschlüssel nicht bei jedem Neuaufbau die Reihenfolge ändern.
+/// Baut die Reihenfolge für alle Modi außer [`PlayOrder::Smart`].
+///
+/// Die intelligente Mischung zieht statt zu sortieren und liegt deshalb in
+/// `scheduler.rs`; hier landet sie als `Random`, damit ein Aufruf mit `Smart`
+/// nicht ins Leere läuft — welcher Modus gilt, entscheidet `state.rs`.
 pub fn build_order(
     index: &CacheIndex,
     enabled_sources: &HashSet<String>,
     order: PlayOrder,
+    newest_first: bool,
     seed: u64,
 ) -> Vec<String> {
     let mut entries: Vec<&CacheEntry> = index
@@ -98,15 +104,13 @@ pub fn build_order(
                 .cmp(&b.file_name.to_lowercase())
                 .then(a.id.cmp(&b.id))
         }),
-        PlayOrder::TakenAt => {
-            entries.sort_by(|a, b| a.sort_time().cmp(&b.sort_time()).then(a.id.cmp(&b.id)))
+        PlayOrder::Chronological => {
+            entries.sort_by(|a, b| a.sort_time().cmp(&b.sort_time()).then(a.id.cmp(&b.id)));
+            if newest_first {
+                entries.reverse();
+            }
         }
-        PlayOrder::Modified => entries.sort_by(|a, b| {
-            let ka = a.remote_mtime.unwrap_or(a.added_at);
-            let kb = b.remote_mtime.unwrap_or(b.added_at);
-            ka.cmp(&kb).then(a.id.cmp(&b.id))
-        }),
-        PlayOrder::Random => entries.sort_by(|a, b| {
+        PlayOrder::Smart | PlayOrder::Random => entries.sort_by(|a, b| {
             order_hash(seed, &a.id)
                 .cmp(&order_hash(seed, &b.id))
                 .then(a.id.cmp(&b.id))
@@ -129,6 +133,15 @@ pub struct Playlist {
 impl Playlist {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Die Reihenfolge als eigene Zeichenketten.
+    ///
+    /// Die intelligente Mischung braucht die Kandidaten ueber die Sperre
+    /// hinaus; geliehene Verweise wuerden die Playlist waehrend der ganzen
+    /// Ziehung festhalten (E-29).
+    pub fn ids_owned(&self) -> Vec<String> {
+        self.order.clone()
     }
 
     pub fn len(&self) -> usize {
@@ -287,6 +300,7 @@ mod tests {
             added_at: 0,
             last_shown: None,
             excluded: false,
+            show_count: 0,
             thumb_bytes: None,
         }
     }
@@ -381,7 +395,7 @@ mod tests {
             entry("2", "s", "apfel.jpg"),
             entry("3", "s", "Bild.jpg"),
         ]);
-        let o = build_order(&idx, &sources(&["s"]), PlayOrder::FileName, 1);
+        let o = build_order(&idx, &sources(&["s"]), PlayOrder::FileName, false, 1);
         assert_eq!(o, vec!["2", "3", "1"]);
     }
 
@@ -395,7 +409,7 @@ mod tests {
         c.remote_mtime = Some(200); // kein EXIF -> Rückfall auf mtime
         let idx = index_of(vec![a, b, c]);
 
-        let o = build_order(&idx, &sources(&["s"]), PlayOrder::TakenAt, 1);
+        let o = build_order(&idx, &sources(&["s"]), PlayOrder::Chronological, false, 1);
         assert_eq!(o, vec!["2", "3", "1"]);
     }
 
@@ -407,7 +421,7 @@ mod tests {
         b.remote_mtime = Some(100);
         let idx = index_of(vec![a, b]);
         assert_eq!(
-            build_order(&idx, &sources(&["s"]), PlayOrder::Modified, 1),
+            build_order(&idx, &sources(&["s"]), PlayOrder::Chronological, false, 1),
             vec!["2", "1"]
         );
     }
@@ -419,9 +433,9 @@ mod tests {
                 .map(|i| entry(&format!("{i:02}"), "s", "x.jpg"))
                 .collect(),
         );
-        let a = build_order(&idx, &sources(&["s"]), PlayOrder::Random, 12345);
-        let b = build_order(&idx, &sources(&["s"]), PlayOrder::Random, 12345);
-        let c = build_order(&idx, &sources(&["s"]), PlayOrder::Random, 99999);
+        let a = build_order(&idx, &sources(&["s"]), PlayOrder::Random, false, 12345);
+        let b = build_order(&idx, &sources(&["s"]), PlayOrder::Random, false, 12345);
+        let c = build_order(&idx, &sources(&["s"]), PlayOrder::Random, false, 99999);
 
         assert_eq!(a, b, "gleicher Seed -> gleiche Reihenfolge");
         assert_ne!(a, c, "anderer Seed -> andere Reihenfolge");
@@ -439,7 +453,7 @@ mod tests {
             entry("1", "aktiv", "a.jpg"),
             entry("2", "aus", "b.jpg"),
         ]);
-        let o = build_order(&idx, &sources(&["aktiv"]), PlayOrder::FileName, 1);
+        let o = build_order(&idx, &sources(&["aktiv"]), PlayOrder::FileName, false, 1);
         assert_eq!(o, vec!["1"]);
     }
 
@@ -449,7 +463,7 @@ mod tests {
         b.excluded = true;
         let idx = index_of(vec![entry("1", "s", "a.jpg"), b]);
         assert_eq!(
-            build_order(&idx, &sources(&["s"]), PlayOrder::FileName, 1),
+            build_order(&idx, &sources(&["s"]), PlayOrder::FileName, false, 1),
             vec!["1"]
         );
     }
@@ -640,7 +654,7 @@ mod tests {
             .map(|i| entry(&format!("{i:02}"), "s", "x.jpg"))
             .collect();
         let idx_vorher = index_of(vorher.clone());
-        let alt = build_order(&idx_vorher, &sources(&["s"]), PlayOrder::Random, 4242);
+        let alt = build_order(&idx_vorher, &sources(&["s"]), PlayOrder::Random, false, 4242);
 
         let mut nachher = vorher;
         nachher.push(entry("neu", "s", "neu.jpg"));
@@ -648,6 +662,7 @@ mod tests {
             &index_of(nachher),
             &sources(&["s"]),
             PlayOrder::Random,
+            false,
             4242,
         );
 
@@ -667,7 +682,7 @@ mod tests {
                 .map(|i| entry(&format!("{i:02}"), "s", "x.jpg"))
                 .collect(),
         );
-        let zufall = build_order(&idx, &sources(&["s"]), PlayOrder::Random, 99);
+        let zufall = build_order(&idx, &sources(&["s"]), PlayOrder::Random, false, 99);
         let sortiert: Vec<String> = (0..30).map(|i| format!("{i:02}")).collect();
         assert_ne!(
             zufall, sortiert,
@@ -682,7 +697,7 @@ mod tests {
                 .map(|i| entry(&format!("{i:02}"), "s", "x.jpg"))
                 .collect(),
         );
-        let o = build_order(&idx, &sources(&["s"]), PlayOrder::Random, 0);
+        let o = build_order(&idx, &sources(&["s"]), PlayOrder::Random, false, 0);
         assert_eq!(o.len(), 10);
         assert_eq!(o.iter().collect::<HashSet<_>>().len(), 10);
     }

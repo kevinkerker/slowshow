@@ -201,6 +201,7 @@ impl Cache {
         // ein Bild nicht künstlich vor der Verdrängung schützt (FA-27).
         let last_shown = self.index.get(&id).and_then(|e| e.last_shown);
         let excluded = self.index.get(&id).map(|e| e.excluded).unwrap_or(false);
+        let show_count = self.index.get(&id).map(|e| e.show_count).unwrap_or(0);
 
         let entry = CacheEntry {
             id,
@@ -216,6 +217,7 @@ impl Cache {
             bytes: prepared.bytes.len() as u64,
             added_at: now,
             last_shown,
+            show_count,
             excluded,
             // Das alte Vorschaubild passt nicht mehr zum neuen Inhalt.
             thumb_bytes: None,

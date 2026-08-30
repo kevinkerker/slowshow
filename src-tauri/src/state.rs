@@ -9,12 +9,13 @@
 
 use crate::cache::Cache;
 use crate::config::ConfigStore;
-use crate::model::{AppConfig, Orientation, Source};
+use crate::model::{AppConfig, Orientation, PlayOrder, Source};
 use crate::playlist::{build_order, Playlist, Slide};
+use crate::scheduler::{Scheduler, SystemRandom};
 use crate::schedule::{self, DisplayState};
 use crate::secrets::{FileKeyProvider, SecretStore};
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
@@ -40,10 +41,25 @@ pub struct AppState {
     pub secrets: Mutex<SecretStore>,
     pub playlist: Mutex<Playlist>,
     config_store: ConfigStore,
+    /// Ablageort des Durchlaufs (E-29).
+    playback_path: PathBuf,
     /// Läuft die Diashow? Pause über Tippen (FA-41) oder Fernsteuerung (FA-55).
     playing: AtomicBool,
     /// Verhindert überlappende Sync-Läufe.
     syncing: AtomicBool,
+    /// Urne der intelligenten Mischung (E-29).
+    ///
+    /// Neben der Playlist und nicht in ihr: die uebrigen Modi sind eine
+    /// Reihenfolge mit Position, die intelligente Mischung eine Ziehung ohne
+    /// feste Folge. Beides in einen Typ zu pressen haette jede Methode mit
+    /// einer Fallunterscheidung belastet.
+    pub scheduler: Mutex<Scheduler>,
+    /// Der gerade gezeigte Slide der intelligenten Mischung.
+    ///
+    /// Muss gemerkt werden, weil `current_slide` nicht ziehen darf: die
+    /// Ziehung hat Nebenwirkungen (Urne, Boost-Zaehler, Historie), und die
+    /// Oberflaeche fragt den aktuellen Stand mehrfach ab.
+    smart_slide: Mutex<Option<Slide>>,
     /// Hängt der Rahmen hochkant? (E-26)
     ///
     /// Beeinflusst nur die Paarbildung (FA-08). Die Einstellung liefert den
@@ -68,6 +84,7 @@ impl AppState {
 
         // Vor dem Verschieben in den Mutex ablesen.
         let starts_portrait = config.orientation == Orientation::Portrait;
+        let playback_path = data_dir.join("playback.json");
 
         let state = Self {
             config: Mutex::new(config),
@@ -76,6 +93,9 @@ impl AppState {
             playlist: Mutex::new(Playlist::new()),
             config_store,
             playing: AtomicBool::new(true),
+            scheduler: Mutex::new(load_scheduler(&playback_path)),
+            playback_path,
+            smart_slide: Mutex::new(None),
             frame_portrait: AtomicBool::new(starts_portrait),
             syncing: AtomicBool::new(false),
         };
@@ -181,7 +201,13 @@ impl AppState {
         };
         let order = {
             let cache = self.cache.lock().expect("Cache-Mutex vergiftet");
-            build_order(cache.index(), &enabled, config.order, seed)
+            build_order(
+                cache.index(),
+                &enabled,
+                config.order,
+                config.playback.newest_first,
+                seed,
+            )
         };
 
         let len = order.len();
@@ -193,13 +219,80 @@ impl AppState {
     }
 
     pub fn current_slide(&self) -> Option<Slide> {
-        let pair_mode = self.config_snapshot().pair_mode;
+        let config = self.config_snapshot();
+
+        if config.order == PlayOrder::Smart {
+            if let Some(slide) = self.smart_slide.lock().ok().and_then(|s| s.clone()) {
+                return Some(slide);
+            }
+            // Erster Aufruf nach dem Start: einmal ziehen, damit ueberhaupt
+            // etwas an der Wand haengt.
+            return self.smart_step();
+        }
+
         let portrait = self.frame_portrait();
         let cache = self.cache.lock().ok()?;
         self.playlist
             .lock()
             .ok()?
-            .current(pair_mode, portrait, cache.index())
+            .current(config.pair_mode, portrait, cache.index())
+    }
+
+    /// Eine Ziehung der intelligenten Mischung, inklusive Paarbildung (E-28).
+    ///
+    /// Die Ziehung liefert ein Bild; passt es nicht zum Rahmenformat und ist
+    /// der Paar-Modus an, wird ein zweites dazugezogen. Findet sich keines,
+    /// laeuft das erste allein.
+    fn smart_step(&self) -> Option<Slide> {
+        let config = self.config_snapshot();
+        let portrait = self.frame_portrait();
+        let now = now_ts();
+        let mut rng = SystemRandom;
+
+        let slide = {
+            let cache = self.cache.lock().ok()?;
+            let candidates = self.playlist.lock().ok()?.ids_owned();
+            let mut sched = self.scheduler.lock().ok()?;
+
+            let first = sched.draw(cache.index(), &candidates, &config.playback, now, &mut rng)?;
+
+            let pairable = |e: &crate::cache::index::CacheEntry| e.is_portrait() != portrait;
+            let first_pairable = cache.index().get(&first).is_some_and(pairable);
+
+            if config.pair_mode && first_pairable {
+                match sched.draw_partner(
+                    cache.index(),
+                    &candidates,
+                    &config.playback,
+                    now,
+                    &mut rng,
+                    &pairable,
+                ) {
+                    Some(second) => Slide::Pair {
+                        left: first,
+                        right: second,
+                    },
+                    None => Slide::Single { id: first },
+                }
+            } else {
+                Slide::Single { id: first }
+            }
+        };
+
+        self.remember_smart(&slide, now);
+        Some(slide)
+    }
+
+    /// Schreibt den gezogenen Slide fort und vermerkt die Anzeige (FA-27, E-29).
+    fn remember_smart(&self, slide: &Slide, now: i64) {
+        if let Ok(mut cache) = self.cache.lock() {
+            for id in slide.ids() {
+                cache.mark_shown(id, now);
+            }
+        }
+        if let Ok(mut cur) = self.smart_slide.lock() {
+            *cur = Some(slide.clone());
+        }
     }
 
     /// Schaltet weiter und merkt die Anzeige für den Ringpuffer (FA-27).
@@ -212,7 +305,23 @@ impl AppState {
     }
 
     fn step(&self, forward: bool) -> Option<Slide> {
-        let pair_mode = self.config_snapshot().pair_mode;
+        let config = self.config_snapshot();
+
+        if config.order == PlayOrder::Smart {
+            if forward {
+                return self.smart_step();
+            }
+            // Zurueck liefert immer ein Einzelbild: die Historie fuehrt Ids,
+            // keine Paare. Ein Paar rueckwaerts wieder herzustellen hiesse,
+            // die Paarbildung in der Historie mitzufuehren -- Aufwand fuer
+            // einen Fall, der beim Zurueckwischen kaum auffaellt.
+            let id = self.scheduler.lock().ok()?.back()?;
+            let slide = Slide::Single { id };
+            self.remember_smart(&slide, now_ts());
+            return Some(slide);
+        }
+
+        let pair_mode = config.pair_mode;
         let portrait = self.frame_portrait();
         let now = now_ts();
 
@@ -299,6 +408,47 @@ impl AppState {
             if let Err(e) = cache.flush() {
                 log::error!("Cache-Index nicht schreibbar: {e}");
             }
+        }
+        self.flush_scheduler();
+    }
+
+    /// Schreibt den Durchlauf der intelligenten Mischung (E-29).
+    ///
+    /// Eigene Datei neben der Konfiguration statt im Cache-Index: der Index
+    /// beschreibt, welche Bilder es gibt, der Durchlauf, welche davon in
+    /// dieser Runde schon dran waren. Beides hat verschiedene Lebensdauern —
+    /// ein neu aufgebauter Cache soll den Durchlauf nicht mitreissen.
+    pub fn flush_scheduler(&self) {
+        let Ok(sched) = self.scheduler.lock() else {
+            return;
+        };
+        match serde_json::to_vec(&*sched) {
+            Ok(bytes) => {
+                if let Err(e) = std::fs::write(&self.playback_path, bytes) {
+                    // Kein Grund zur Aufregung: geht der Durchlauf verloren,
+                    // beginnt beim naechsten Start ein neuer.
+                    log::warn!("Durchlauf nicht schreibbar: {e}");
+                }
+            }
+            Err(e) => log::warn!("Durchlauf nicht serialisierbar: {e}"),
+        }
+    }
+}
+
+/// Laedt den Durchlauf, falls einer gespeichert ist (E-29).
+///
+/// Ein unlesbarer Stand fuehrt zu einem frischen Durchlauf, nicht zum
+/// Startabbruch — dieselbe Haltung wie beim Cache-Index (NF-02).
+fn load_scheduler(path: &Path) -> Scheduler {
+    match std::fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+            log::warn!("Durchlauf unlesbar, beginne neu: {e}");
+            Scheduler::new()
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Scheduler::new(),
+        Err(e) => {
+            log::warn!("Durchlauf nicht lesbar: {e}");
+            Scheduler::new()
         }
     }
 }

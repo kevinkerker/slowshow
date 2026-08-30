@@ -43,6 +43,13 @@ pub struct CacheEntry {
     /// Zeitpunkt der letzten Anzeige. `None` = noch nie gezeigt.
     #[serde(default)]
     pub last_shown: Option<i64>,
+    /// Wie oft das Bild bereits gezeigt wurde (E-29).
+    ///
+    /// Gilt quellenübergreifend. Fließt heute nur in die Statistik der Wartung
+    /// ein; das Erweiterungspapier hält den Wert ausdrücklich als Vorhalt für
+    /// spätere Gewichtungen vor.
+    #[serde(default)]
+    pub show_count: u32,
     /// Aus der Diashow entfernt, ohne an der Quelle zu löschen (FA-30).
     #[serde(default)]
     pub excluded: bool,
@@ -148,6 +155,23 @@ impl CacheIndex {
         self.entries.get_mut(id)
     }
 
+    /// Setzt Anzeigezeitpunkt und Zaehler zurueck (Wartung F3, E-29).
+    ///
+    /// Gibt zurueck, wie viele Eintraege sich geaendert haben.
+    pub fn reset_history(&mut self, ids: &[String]) -> usize {
+        let mut n = 0;
+        for id in ids {
+            if let Some(e) = self.entries.get_mut(id) {
+                if e.last_shown.is_some() || e.show_count > 0 {
+                    e.last_shown = None;
+                    e.show_count = 0;
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+
     pub fn by_source_path(&self, source_id: &str, rel_path: &str) -> Option<&CacheEntry> {
         let id = self.by_key.get(&key_of(source_id, rel_path))?;
         self.entries.get(id)
@@ -245,6 +269,10 @@ impl CacheIndex {
         match self.entries.get_mut(id) {
             Some(e) => {
                 e.last_shown = Some(now);
+                // Nur bei tatsaechlicher Anzeige, nicht bei verworfenen
+                // Ziehungen des Cluster-Filters (E-29) — `mark_shown` wird
+                // ausschliesslich nach einem Bildwechsel gerufen.
+                e.show_count = e.show_count.saturating_add(1);
                 true
             }
             None => false,
@@ -342,6 +370,7 @@ mod tests {
             added_at: added,
             last_shown: None,
             excluded: false,
+            show_count: 0,
             thumb_bytes: None,
         }
     }

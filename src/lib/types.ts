@@ -6,8 +6,17 @@
  * deshalb die Standardwerte ab, die beide Seiten teilen.
  */
 
-/** Reihenfolge der Diashow (FA-03). */
-export type PlayOrder = 'random' | 'fileName' | 'takenAt' | 'modified'
+/** Reihenfolge der Diashow (FA-03, fortgeschrieben durch E-29). */
+export type PlayOrder = 'smart' | 'random' | 'fileName' | 'chronological'
+
+/** Feineinstellungen der Wiedergabe (E-29). */
+export interface PlaybackConfig {
+  newBoost: boolean
+  leastRecentlyShown: boolean
+  clusterFilter: boolean
+  /** Nur bei `chronological`: neueste zuerst. */
+  newestFirst: boolean
+}
 
 /** Darstellung bei abweichendem Seitenverhältnis (FA-05). */
 export type FitMode = 'contain' | 'cover'
@@ -157,6 +166,8 @@ export interface AppConfig {
   protectSettings: boolean
   /** Ausrichtung des Rahmens (E-26). */
   orientation: Orientation
+  /** Feineinstellungen der Wiedergabe (E-29). */
+  playback: PlaybackConfig
   language: 'auto' | 'de' | 'en'
   sources: Source[]
 }
@@ -185,6 +196,8 @@ export interface CacheEntry {
   excluded: boolean
   /** Größe des Vorschaubilds, sobald eines erzeugt wurde (E-25). */
   thumbBytes: number | null
+  /** Wie oft das Bild bereits gezeigt wurde (E-29). */
+  showCount: number
 }
 
 /** Was der Bild-Browser anzeigt (E-25). */
