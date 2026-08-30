@@ -227,7 +227,7 @@ Prüfung aller Anforderungen gegen den aktuellen Stand von Tauri 2 auf Android. 
 | E-07 | Videowiedergabe | **Gestrichen** | FA-11 entfällt; Widerspruch zum Nicht-Ziel (Abschnitt 1.3) aufgelöst. Videodateien in Quellen werden ignoriert. |
 | E-08 | Google Photos | **Gestrichen** | FA-24 entfällt (API-Beschränkungen, R-07); Handy-Fotos gelangen über den Nextcloud-Auto-Upload in die Diashow. |
 | E-09 | Fernkonfiguration | **In FA-55 integriert** | Keine eigene Weboberfläche (FA-44 entfällt); die REST-Endpunkte aus FA-55 decken Grundeinstellungen mit ab. |
-| E-10 | Referenz-Tablet | **Noch offen** | Bewusst vertagt; muss spätestens vor Meilenstein M1 feststehen, da Performance- und Stabilitätsziele (NF-01, NF-06, R-02) sonst nicht prüfbar sind. |
+| E-10 | Referenz-Tablet | **Xiaomi Pad 6** (`pipa`, 23043RP34G) | Android 14 unter HyperOS 2.0, 2880 x 1800 bei 400 dpi, 11 Zoll Querformat, 8 GB RAM. Erfuellt RB-02 mit Abstand. Damit sind NF-01 (7 Tage stabil), NF-06 (CPU-Last) und R-02 (WebView-Version, hier Chromium 151) erstmals pruefbar, und die Screenshots fuer den Play-Store-Eintrag koennen vom Zielgeraet kommen. Zu beachten ist die HyperOS-Sperre fuer Installationen ueber USB (siehe 11.4) -- sie betrifft die Entwicklung, nicht das Produkt. |
 | E-11 | App-Name | **Slowshow** | Erfundenes, praktisch konfliktfreies Wortspiel („entschleunigte Slideshow“) – gut suchbar im Play Store, international verständlich. Ersetzt den Platzhalter „FrameOS“. |
 | E-12 | Open Source & Distribution | **Apache 2.0, Veröffentlichung im Play Store** | RB-03/RB-05 angepasst; Lieferumfang um AAB, Store-Eintrag, Datenschutzerklärung und LICENSE erweitert; neues Risiko R-13 (Play-Store-Pflegepflicht) aufgenommen. Apache 2.0 passt zum Rust-/Tauri-Ökosystem. |
 | E-13 | Design & App-Icon | **Galerie-minimal; Icon „Rahmen & Horizont"** | Designsystem: Tiefschwarz #0A0A0A (OLED-freundlich, stützt NF-07), Off-White #F2EFE9, Akzent Messing #C2A878; Instrument Sans (UI) + Cormorant Garamond (Wortmarke/Bildunterschriften). App-Icon: weißer Rahmen mit Messing-Horizont und -Sonne auf Schwarz; unter 48 px entfällt die Sonne. Mockups im Design-Canvas „Slowshow App-Design". |
@@ -238,14 +238,14 @@ Prüfung aller Anforderungen gegen den aktuellen Stand von Tauri 2 auf Android. 
 | E-18 | Bedienung der Diashow | **Tippzonen zusätzlich zum Wischen** | FA-41 verlangt „Wischgesten für vor/zurück, Tippen für Pause/Weiter". Wischen bleibt; ergänzt werden drei Tippzonen: linkes Drittel zurück, Mitte Pause, rechtes Drittel weiter. Auf einem an der Wand hängenden Rahmen ist ein kurzer Tipp bequemer als eine Wischbewegung — und die großzügige Mitte fängt Fehlgriffe auf die harmlose Aktion. Drittel, weil das die verbreitete Aufteilung ist (E-Book-Leser) und damit am wenigsten überrascht. Langer Druck öffnet weiterhin die Einstellungen (FA-43). |
 | E-20 | Analoguhr | **Getrennt schaltbar, Strichindex, ohne Sekundenzeiger** | Drei Teilfragen, einzeln entschieden. *Ort:* Diashow (FA-07) und Nachtmodus (FA-54) bekommen je einen eigenen Schalter — analog nachts neben digital tagsüber ist eine sinnvolle Kombination, kein Widerspruch. *Stil:* dünner Ring mit zwölf Marken, die auf zwölf/drei/sechs/neun länger; kein Zifferblatt mit Ziffern. Ziffern in der Display-Serife wären die auffälligste Variante gewesen — auf einem Rahmen, dessen Fotos der einzige helle Bereich sein sollen, ist das zu viel. *Sekundenzeiger:* keiner. `useNow` taktet bewusst nur auf die volle Minute (NF-06); ein Sekundenzeiger hielte die WebView rund um die Uhr im Sekundentakt am Zeichnen. Der Stundenzeiger wandert dafür stufenlos mit der Minute mit, sonst stünde er bei einer Uhr ohne Ziffern schlicht falsch. Zum Einbrennen (NF-07): eine Analoguhr ist nicht automatisch besser als eine digitale — die Zeiger rotieren zwar, Ring und Marken stehen aber dauerhaft. Der Pixel-Shift gilt unverändert. |
 | E-21 | Anzeige der Pause | **Dauerhaftes Abzeichen statt kurzer Einblendung** | Bisher erschien „Pausiert" für gut zwei Sekunden und verschwand. Ein Rahmen, der stehenbleibt, sieht danach aus wie einer, der hängt — der Hinweis war genau dann weg, wenn später jemand davorstand. Das Abzeichen steht oben in der Mitte, solange die Pause gilt, in Messing statt Off-White: es meldet einen Zustand, keine Meldung. Nicht im Nachtmodus, dort soll der Schirm dunkel bleiben (FA-54). Es wandert wie die übrigen Einblendungen (NF-07) — eine Pause kann Tage dauern. |
-| E-22 | Gerätegesteuerte Helligkeit | **Zusätzliche Option, die die Regelung vollständig abgibt — auch nachts** | FA-53 sah nur die Steuerung *durch* die App vor. Wer die Helligkeitsautomatik des Geräts bevorzugt, schaltet sie nun ein; die App setzt dann in **keinem** Zustand mehr eine Fensterhelligkeit (`BRIGHTNESS_OVERRIDE_NONE`) — weder tagsüber, noch nachts, noch auf einen Schlafbefehl aus dem Heimnetz. Eine Ausnahme „nur nachts doch" wäre nicht zu erklären: der Rahmen verhielte sich abends anders als morgens, ohne dass jemand etwas umgestellt hätte. Die abendliche Absenkung entfällt ebenfalls — sie würde gegen die Systemautomatik arbeiten — und die zugehörigen Regler werden ausgeblendet statt wirkungslos stehenzubleiben. **FA-52 bleibt trotzdem erfüllt:** außerhalb der Aktivzeit legt die Oberfläche den Schirm auf Schwarz (`dimOpacity` in `src/lib/dim.ts`). Geschwärzt wird der Inhalt, nur eben nicht zusätzlich die Hintergrundbeleuchtung. Technisch reist der Zustand als Wert `0` im vorhandenen Helligkeitsfeld statt als zweites Feld: die Helligkeit läuft über das Anzeige-Ereignis, REST (FA-55) und MQTT, und ein zusätzliches Feld wäre an jeder Stelle, die es übersieht, stumm wirkungslos. Der Schalter selbst ist fernsteuerbar — über REST als `deviceBrightness` und über MQTT als `cmd/device_brightness` mit eigener Discovery-Entität: wer die Helligkeit in Home Assistant automatisiert, muss die Automatik auch von dort umlegen können. |
+| E-22 | Gerätegesteuerte Helligkeit | **Zusätzliche Option, die die Regelung vollständig abgibt — auch nachts** | FA-53 sah nur die Steuerung *durch* die App vor. Wer die Helligkeitsautomatik des Geräts bevorzugt, schaltet sie nun ein; die App setzt dann in **keinem** Zustand mehr eine Fensterhelligkeit (`BRIGHTNESS_OVERRIDE_NONE`) — weder tagsüber, noch nachts, noch auf einen Schlafbefehl aus dem Heimnetz. Eine Ausnahme „nur nachts doch" wäre nicht zu erklären: der Rahmen verhielte sich abends anders als morgens, ohne dass jemand etwas umgestellt hätte. Die abendliche Absenkung entfällt ebenfalls — sie würde gegen die Systemautomatik arbeiten — und die zugehörigen Regler werden ausgeblendet statt wirkungslos stehenzubleiben. **FA-52 bleibt trotzdem erfüllt:** außerhalb der Aktivzeit legt die Oberfläche den Schirm auf Schwarz (`dimOpacity` in `src/lib/dim.ts`). Geschwärzt wird der Inhalt, nur eben nicht zusätzlich die Hintergrundbeleuchtung. Technisch reist der Zustand als Wert `0` im vorhandenen Helligkeitsfeld statt als zweites Feld: die Helligkeit läuft über das Anzeige-Ereignis, REST (FA-55) und MQTT, und ein zusätzliches Feld wäre an jeder Stelle, die es übersieht, stumm wirkungslos. Der Schalter selbst ist fernsteuerbar — über REST als `deviceBrightness` und über MQTT als `cmd/device_brightness` mit eigener Discovery-Entität: wer die Helligkeit in Home Assistant automatisiert, muss die Automatik auch von dort umlegen können. Ein Helligkeitsbefehl über REST oder MQTT wird währenddessen gespeichert, bleibt aber wirkungslos, bis die Gerätesteuerung wieder aus ist — er schaltet sie **nicht** stillschweigend ab. Sonst entschiede eine Automatisierung über eine Einstellung, die niemand angeordnet hat. |
 | E-17 | Umsetzungsstufe NF-05 | **Noch offen** – siehe Abschnitt 10 | Umgesetzt ist AES-256-GCM (reines Rust) mit Schlüsseldatei im App-privaten Verzeichnis. Die Keystore-Bindung fehlt noch; die Trennlinie dafür ist der `KeyProvider`-Trait in `src-tauri/src/secrets.rs`. |
 
 ## 10. Offene Punkte
 
 ### 10.1 Entscheidungsbedarf
 
-**E-10 – Referenz-Tablet.** Weiterhin offen und der einzige echte Blocker vor M1: ohne festgelegtes Gerät sind NF-01 (7 Tage stabil), NF-06 (CPU-Last) und R-02 (WebView-Version) nicht prüfbar, und der Play-Store-Eintrag braucht Screenshots vom Zielgerät.
+**E-10 – Referenz-Tablet: entschieden.** Das Xiaomi Pad 6 ist die Referenz. Damit entfällt der letzte Blocker vor M1: der Dauertest über 7 Tage, der Speichertest mit 5 000 Bildern und der Neustart-Test können beginnen, und die Play-Store-Screenshots kommen vom Zielgerät. Die Befunde des ersten Laufs stehen in 11.4.
 
 **E-17 – Wie weit soll NF-05 gehen?** Die Anforderung lautet „Android Keystore oder gleichwertige Verschlüsselung". Umgesetzt ist die Verschlüsselung, nicht die Keystore-Bindung. Drei Optionen:
 
@@ -257,17 +257,19 @@ Prüfung aller Anforderungen gegen den aktuellen Stand von Tauri 2 auf Android. 
 
 Empfehlung zur Diskussion: A für M2, B als Ausbauoption nach dem Dauertest — die Entscheidung ist reversibel, weil die Aufrufstellen hinter `KeyProvider` unverändert bleiben.
 
-**Schriftlizenzen.** Instrument Sans und Cormorant Garamond stehen unter der SIL OFL 1.1 und werden per `scripts/fetch-fonts.mjs` ins Repository geholt (nicht zur Laufzeit geladen, NF-04). Die OFL ist Apache-2.0-verträglich; für die Drittlizenz-Übersicht aus 5.1 ist sie aufzunehmen.
+**Drittlizenzen: erledigt, mit einem Befund.** Die Übersicht aus 5.1 und RB-05 liegt als [docs/third-party-licenses.md](docs/third-party-licenses.md) vor und wird von `npm run licenses` aus `cargo metadata` und den installierten npm-Paketen erzeugt — eine handgepflegte Liste wäre beim nächsten `cargo update` falsch, ohne dass es jemand merkt. Erfasst sind 334 Rust-Kisten (gefiltert auf `aarch64-linux-android`, nicht die 547 des vollen Baums) und 36 npm-Pakete. Die Schriften sind darin aufgenommen: SIL OFL 1.1, Apache-2.0-verträglich, unverändert gebündelt.
+
+**Befund zu RB-05.** RB-05 verlangt „permissive Lizenzen". Fünf Kisten sind es nicht ganz: `cssparser`, `cssparser-macros`, `dtoa-short`, `selectors` und `option-ext` stehen unter der MPL-2.0, also unter schwachem Copyleft. Alle fünf kommen **transitiv über Tauri selbst** — die ersten vier über `dom_query` → `tauri-utils`, `option-ext` über `dirs` → `tauri` —, sind also ohne Verzicht auf Tauri nicht vermeidbar. Praktisch entsteht daraus keine Auflage über den Lizenzhinweis hinaus: das Copyleft der MPL-2.0 wirkt je Datei, die Kisten werden unverändert von crates.io eingebunden, und die Apache-2.0-Lizenzierung von Slowshow bleibt unberührt. Vorschlag: RB-05 auf „permissiv oder schwaches Copyleft ohne Auswirkung auf das Gesamtwerk" präzisieren, statt eine Einschränkung stehen zu lassen, die das Projekt faktisch nicht einhält.
 
 ### 10.2 Aus der Umsetzung entstanden
 
-- **MQTT nachgereicht.** FA-55 nennt „REST-Endpunkte **oder** MQTT"; inzwischen sind beide da. MQTT bringt drei Dinge, die REST nicht kann: das Tablet braucht keine feste Adresse mehr (es verbindet sich zum Broker statt umgekehrt), Zustandsänderungen kommen ohne Polling an, und über das „letzte Wort" sieht Home Assistant einen Ausfall sofort. Mit Discovery meldet sich der Rahmen von allein als Gerät mit elf Entitäten an. Beide Wege laufen über dieselben Aktionen in `control.rs` und können deshalb nicht auseinanderlaufen.
+- **MQTT nachgereicht.** FA-55 nennt „REST-Endpunkte **oder** MQTT"; inzwischen sind beide da. MQTT bringt drei Dinge, die REST nicht kann: das Tablet braucht keine feste Adresse mehr (es verbindet sich zum Broker statt umgekehrt), Zustandsänderungen kommen ohne Polling an, und über das „letzte Wort" sieht Home Assistant einen Ausfall sofort. Mit Discovery meldet sich der Rahmen von allein als Gerät mit zwölf Entitäten an. Beide Wege laufen über dieselben Aktionen in `control.rs` und können deshalb nicht auseinanderlaufen.
 - **Foreground-Service noch nicht umgesetzt.** Abschnitt 8 nennt ihn für NF-01 und R-04. Aktuell decken `FLAG_KEEP_SCREEN_ON` und die angefragte Akku-Ausnahme den Fall ab. Ob das auf dem Referenzgerät über 7 Tage trägt, muss der Dauertest zeigen — das ist genau die Frage, die M1 beantworten soll.
 - **Watchdog (NF-02) nur teilweise.** Umgesetzt sind Selbstheilung der Datenhaltung (defekter Index, fehlende Cache-Dateien, unlesbare Konfiguration führen zu Standardwerten statt zum Startabbruch) und ein Panic-Hook. Ein echter Neustart nach Prozessabbruch braucht den Foreground-Service aus dem vorigen Punkt.
 
 ## 11. Umsetzungsstand
 
-Stand 30. August 2026. Geprüft durch 207 Rust- und 79 Frontend-Tests sowie Clippy ohne Warnungen. Seit 11.4 laufen die Angaben zum Verhalten auf einem echten Tablet statt auf einem Telefon; ein Gerät nach RB-02 ist es weiterhin nicht (E-10).
+Stand 30. August 2026. Geprüft durch 207 Rust- und 84 Frontend-Tests sowie Clippy ohne Warnungen. Seit 11.4 laufen die Angaben zum Verhalten auf einem echten Tablet statt auf einem Telefon; ein Gerät nach RB-02 ist es weiterhin nicht (E-10).
 
 ### 11.1 Ergebnis der Code-Durchsicht
 
@@ -311,17 +313,17 @@ Vier weitere Punkte, die erst beim Benutzen auffielen:
 | **Bilder erst nach vollständigem Sync** | Die Playlist wurde erst *nach* Abschluss neu gebaut. Bis dahin blieb der Rahmen leer, obwohl längst Bilder im Cache lagen — im Widerspruch zum Sinn von FA-01 und FA-28. | Playlist wächst während des Syncs mit: das erste Bild startet die Diashow sofort, danach in Schritten von 25. Gilt für entfernte Quellen wie für lokale Ordner. |
 | **Schriften fehlten** | `fetch-fonts.mjs` war nie gelaufen; die WebView bekam HTML statt woff2 und meldete `OTS parsing error`. Der Rückfall auf Systemschrift funktionierte, aber das Schriftbild wich vom Entwurf ab. | Schriften geholt und im Repository abgelegt (49 KB, SIL OFL, RB-05) |
 
-**Noch offen:** Der erste vollständige Durchlauf mit einer echten Quelle —
-Ordner wählen, synchronisieren, Diashow. Der brach bisher am Serde-Fehler ab
-und ist nach dem Fix zu wiederholen.
+**Inzwischen erledigt:** Der erste vollständige Durchlauf mit einer echten
+Quelle — Ordner wählen, synchronisieren, Diashow — ist am Xiaomi Pad 6
+gelaufen; siehe 11.4.
 
 **Nachträglich geschlossen:** Die native Hälfte von FA-53 hatte keinen Aufrufer — `MainActivity.setScreenBrightness` war geschrieben, aber nie verbunden. Die Brücke liegt jetzt in `src-tauri/src/brightness.rs` (JNI, nur für Android übersetzt) und wird bei jeder Änderung des Anzeigezustands aufgerufen. Sie übersetzt für das Android-Ziel; die Wirkung auf dem Display ist erst am Referenzgerät prüfbar (E-10).
 
 ### 11.4 Erster Lauf auf einem Tablet
 
 Testgerät: Xiaomi Pad 6 (`pipa`), Android 14, HyperOS `OS2.0.16.0.UMZMIXM`,
-2880 × 1800 bei 400 dpi. Näher an RB-02 als das Telefon aus 11.2, aber
-weiterhin kein Referenzgerät.
+2880 × 1800 bei 400 dpi. Seit E-10 ist es **das Referenzgerät**, nicht mehr nur
+das nächstbeste zur Hand.
 
 | Befund | Ursache | Behoben durch |
 |---|---|---|
@@ -330,9 +332,18 @@ weiterhin kein Referenzgerät.
 | **Kamera-Dienst beim Start** | Die WebView-Initialisierung zählt Kameras auf (`Start proc com.android.camera … caller=dev.kerker.slowshow`), was `Long monitor contention … onTorchStatusChanged for 705ms` auslöst. Chromiums Verhalten, nicht unseres. | Nicht behoben — nur festgehalten. Rund 0,7 s zusätzliche Startzeit; im Dauerbetrieb ohne Bedeutung, beim Entwickeln störend. |
 
 **Auf dem Gerät bestätigt:** Diashow läuft mit einer echten Nextcloud-Quelle
-über WebDAV, Sync und Cache greifen, Uhr und Datumszeile stehen wie im
-Entwurf. Damit ist der in 11.3 als offen vermerkte erste vollständige
-Durchlauf — Ordner wählen, synchronisieren, Diashow — nachgeholt.
+über WebDAV, Sync und Cache greifen, Uhr und Datumszeile stehen wie im Entwurf.
+Damit ist der in 11.3 als offen vermerkte erste vollständige Durchlauf — Ordner
+wählen, synchronisieren, Diashow — nachgeholt. Ebenfalls am Gerät geprüft: das
+Umschalten zwischen Ziffern und Zeigern (E-20) greift zur Laufzeit, und das
+dauerhafte Pausen-Abzeichen (E-21) bleibt stehen, solange die Pause gilt.
+
+**Bauzeit und APK-Größe.** Gradle ruft den Rust-Build einmal *je ABI* auf. Ein
+Debug-APK für alle vier wiegt 1 441 MB, weil vier ungestrippte
+Rust-Debug-Bibliotheken darin liegen; nur für `aarch64` sind es 325 MB bei
+einem Viertel der Übersetzungszeit. `deploy-android.ps1 -dev -arm64`
+(`npm run android:deploy:arm64`) ist deshalb der Weg für Entwicklungsrunden.
+Für ein Release in den Play Store werden weiterhin alle ABIs gebraucht.
 
 | Bereich | Anforderungen | Stand | Ort im Code |
 |---|---|---|---|
@@ -353,5 +364,6 @@ Durchlauf — Ordner wählen, synchronisieren, Diashow — nachgeholt.
 | Cache-Ablage, Rust-Dekodierung, Delta-Sync, GPU-Übergänge | NF-12 bis NF-16 | umgesetzt | `decode.rs`, `cache/index.rs`, `SlideStage.vue` |
 | CI-Build | Maßnahme zu R-11 und R-13 | umgesetzt | `.github/workflows/ci.yml` |
 | Play-Store-Unterlagen | 5.1, RB-03 | vorbereitet | `docs/store-listing.md`, `docs/privacy-policy.md` |
+| Drittlizenz-Übersicht | 5.1, RB-05 | umgesetzt – Befund zu RB-05 in 10.1 | `docs/third-party-licenses.md`, erzeugt von `scripts/third-party-licenses.mjs` |
 
-**Noch nicht begonnen:** Dauertest über 7 Tage (5.2), Speichertest mit 5 000 Bildern (5.2), Neustart-Test auf echter Hardware. Alle drei setzen E-10 voraus.
+**Noch nicht begonnen:** Dauertest über 7 Tage (5.2), Speichertest mit 5 000 Bildern (5.2), Neustart-Test auf echter Hardware. Mit E-10 sind alle drei jetzt durchführbar — das Referenzgerät steht fest und die App läuft darauf.

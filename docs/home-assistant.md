@@ -30,9 +30,9 @@ In Slowshow: **Einstellungen → System → MQTT** einschalten und eintragen:
 | Automatisch anmelden | an | legt die Entitäten selbst an |
 
 Das war es. Nach dem Verbinden erscheint in Home Assistant ein Gerät
-**Slowshow** mit elf Entitäten:
+**Slowshow** mit zwölf Entitäten:
 
-- **Schalter:** Diashow, Bildschirm
+- **Schalter:** Diashow, Bildschirm, Helligkeit vom Gerät
 - **Knöpfe:** Nächstes Bild, Vorheriges Bild, Synchronisieren
 - **Zahlen:** Anzeigedauer (5 s … 30 min), Helligkeit (1 … 100 %)
 - **Sensoren:** Bilder im Cache, Cachegröße

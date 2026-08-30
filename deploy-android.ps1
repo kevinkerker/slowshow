@@ -2,15 +2,25 @@
 # Voraussetzung: Geraet per USB verbunden, USB-Debugging aktiv.
 #
 # Verwendung:
-#   .\deploy-android.ps1           # Release-Build (braucht einen Signaturschluessel)
-#   .\deploy-android.ps1 -dev      # Debug-Build, mit Chrome DevTools  <- zum Testen
+#   .\deploy-android.ps1                # Release-Build (braucht einen Signaturschluessel)
+#   .\deploy-android.ps1 -dev           # Debug-Build fuer alle vier ABIs
+#   .\deploy-android.ps1 -dev -arm64    # nur fuers Tablet  <- schnellster Weg zum Testen
 #
 # Zum Ausprobieren ist -dev der richtige Weg: Debug-APKs signiert Gradle
 # selbst, ein Release-APK ohne eingerichteten Schluessel laesst sich nicht
 # installieren.
+#
+# -arm64 baut nur fuer aarch64 statt fuer alle vier ABIs. Gradle ruft den
+# Rust-Build einmal *je ABI* auf, es entfaellt also drei Viertel der
+# Uebersetzung; und das Debug-APK schrumpft deutlich, weil die ungestrippten
+# Rust-Debug-Bibliotheken den Grossteil davon ausmachen (gemessen: 1,4 GB fuer
+# alle vier). Fuer jedes Tablet und Telefon der letzten Jahre reicht aarch64.
+# Nicht geeignet fuer den Emulator (meist x86_64) und nicht fuer ein Release,
+# das in den Play Store soll -- dort werden alle ABIs gebraucht.
 
 param(
-    [switch]$dev
+    [switch]$dev,
+    [switch]$arm64
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,15 +50,23 @@ if ($LASTEXITCODE -ne 0) { exit 1 }
 
 $outputs = "src-tauri\gen\android\app\build\outputs\apk"
 
+# Als Array aufgebaut und mit @() uebergeben: eine zusammengesetzte
+# Zeichenkette wuerde von PowerShell als *ein* Argument an npx gereicht, und
+# tauri saehe "--apk --debug" als einen einzigen Schalter.
+$buildArgs = @("tauri", "android", "build", "--apk")
 if ($dev) {
-    npx tauri android build --apk --debug
-    if ($LASTEXITCODE -ne 0) { exit 1 }
+    $buildArgs += "--debug"
     $variant = "debug"
 } else {
-    npx tauri android build --apk
-    if ($LASTEXITCODE -ne 0) { exit 1 }
     $variant = "release"
 }
+if ($arm64) {
+    $buildArgs += @("--target", "aarch64")
+    Write-Host "Baue nur fuer aarch64 - drei Viertel der Uebersetzung entfallen."
+}
+
+npx @buildArgs
+if ($LASTEXITCODE -ne 0) { exit 1 }
 
 # Den tatsaechlich erzeugten Dateinamen suchen statt ihn zu raten:
 # ohne Signaturschluessel heisst das Release-APK "…-release-unsigned.apk",

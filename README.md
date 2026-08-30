@@ -241,3 +241,9 @@ Präsenzerkennung per Kamera, die im Lastenheft bewusst gestrichen wurde (E-05).
 ## Lizenz
 
 Apache-Lizenz 2.0 — siehe [LICENSE](LICENSE).
+
+Die Übersicht der eingebundenen Fremdbibliotheken steht in
+[docs/third-party-licenses.md](docs/third-party-licenses.md). Sie wird nicht von
+Hand gepflegt, sondern mit `npm run licenses` aus `cargo metadata` und den
+installierten npm-Paketen erzeugt — eine handgeschriebene Liste wäre beim
+nächsten `cargo update` still veraltet.
