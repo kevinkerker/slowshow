@@ -350,6 +350,17 @@ pub fn handle_command(app: &AppHandle, topics: &Topics, topic: &str, payload: &s
             ),
             Err(_) => log::warn!("MQTT: 'interval' erwartet eine Zahl, war '{payload}'"),
         },
+        "device_brightness" => {
+            if let Some(on) = control::parse_switch(payload) {
+                apply_patch(
+                    app,
+                    control::ConfigPatch {
+                        device_brightness: Some(on),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
         "brightness" => match payload.trim().parse::<u8>() {
             Ok(v) => apply_patch(
                 app,

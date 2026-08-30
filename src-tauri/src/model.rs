@@ -34,6 +34,20 @@ pub enum FitMode {
     Cover,
 }
 
+/// Darstellung der Uhr (E-20).
+///
+/// Gilt getrennt für die Einblendung über dem Foto (FA-07) und für den
+/// Nachtmodus (FA-54) — nachts darf eine andere Uhr stehen als tagsüber.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ClockStyle {
+    /// Ziffern wie im Entwurf (Artboards „Diashow" und „Nachtmodus").
+    #[default]
+    Digital,
+    /// Zeiger auf einem Zifferblatt mit Strichindex.
+    Analog,
+}
+
 /// Weiche Überblendungen (FA-06).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,6 +82,9 @@ pub struct OverlayConfig {
     /// Durchgestrichenes Auge — Bild aus der Diashow nehmen (FA-30).
     #[serde(default = "default_true")]
     pub show_exclude_button: bool,
+    /// Ziffern oder Zeiger für die Uhr über dem Foto (E-20).
+    #[serde(default)]
+    pub clock_style: ClockStyle,
 }
 
 impl Default for OverlayConfig {
@@ -80,6 +97,7 @@ impl Default for OverlayConfig {
             pixel_shift: true,
             show_settings_button: true,
             show_exclude_button: true,
+            clock_style: ClockStyle::Digital,
         }
     }
 }
@@ -98,6 +116,9 @@ pub struct ScheduleConfig {
     pub active_to: String,
     /// Statt komplett schwarz eine gedimmte Uhr zeigen (FA-54).
     pub night_clock: bool,
+    /// Ziffern oder Zeiger für die Nachtuhr (E-20).
+    #[serde(default)]
+    pub night_clock_style: ClockStyle,
 }
 
 impl Default for ScheduleConfig {
@@ -107,6 +128,7 @@ impl Default for ScheduleConfig {
             active_from: "07:00".into(),
             active_to: "22:00".into(),
             night_clock: true,
+            night_clock_style: ClockStyle::Digital,
         }
     }
 }
@@ -123,6 +145,14 @@ pub struct BrightnessConfig {
     pub dim_from: String,
     /// Abgesenkte Helligkeit in Prozent.
     pub dim_level: u8,
+    /// Das Gerät regelt die Helligkeit selbst (E-22).
+    ///
+    /// Die App setzt dann keine Fensterhelligkeit mehr, sodass die
+    /// Systemautomatik greift. Der Nachtmodus bleibt davon unberührt: FA-52
+    /// ist ein MUSS und würde sonst nachts einen hell leuchtenden Rahmen
+    /// stehen lassen.
+    #[serde(default)]
+    pub device_controlled: bool,
 }
 
 impl Default for BrightnessConfig {
@@ -132,6 +162,7 @@ impl Default for BrightnessConfig {
             auto_dim: false,
             dim_from: "20:00".into(),
             dim_level: 40,
+            device_controlled: false,
         }
     }
 }
@@ -495,6 +526,35 @@ mod tests {
             "fehlende Felder kommen aus Default"
         );
         assert!(c.sources.is_empty());
+    }
+
+    #[test]
+    fn uhrstil_faellt_ohne_feld_auf_digital_zurueck_e_20() {
+        // Eine config.json, die vor E-20 geschrieben wurde, kennt weder
+        // `clockStyle` noch `nightClockStyle`. Beide müssen dann auf der
+        // bisherigen Darstellung landen — ein Update darf das Aussehen des
+        // Rahmens nicht von sich aus ändern (NF-10).
+        let json = r#"{ "overlays": { "showClock": true, "showDate": true,
+                                      "showFileName": false, "showTakenAt": false,
+                                      "pixelShift": true },
+                        "schedule": { "enabled": true, "activeFrom": "07:00",
+                                      "activeTo": "22:00", "nightClock": true } }"#;
+        let c: AppConfig = serde_json::from_str(json).expect("Altkonfiguration muss laden");
+        assert_eq!(c.overlays.clock_style, ClockStyle::Digital);
+        assert_eq!(c.schedule.night_clock_style, ClockStyle::Digital);
+    }
+
+    #[test]
+    fn uhrstil_wird_als_camel_case_uebertragen_e_20() {
+        // Das Frontend liest die Werte als String-Literale ('digital' |
+        // 'analog') aus `types.ts`. Weicht die Schreibweise ab, greift dort
+        // stumm der Digital-Zweig.
+        let mut c = AppConfig::default();
+        c.overlays.clock_style = ClockStyle::Analog;
+        c.schedule.night_clock_style = ClockStyle::Analog;
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains(r#""clockStyle":"analog""#), "{json}");
+        assert!(json.contains(r#""nightClockStyle":"analog""#), "{json}");
     }
 
     #[test]

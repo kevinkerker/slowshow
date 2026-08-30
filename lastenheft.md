@@ -63,7 +63,7 @@ Priorisierung: **MUSS** (zwingend), **SOLL** (wichtig, verhandelbar), **KANN** (
 | FA-04 | MUSS | Unterstützte Bildformate: JPEG, PNG, WebP; Fotos werden unter Berücksichtigung der EXIF-Orientierung korrekt gedreht angezeigt. |
 | FA-05 | MUSS | Hoch- und Querformatbilder werden ohne Verzerrung dargestellt (Modi: „Einpassen mit Hintergrund" und „Formatfüllend mit Beschnitt", umschaltbar). |
 | FA-06 | SOLL | Weiche Überblendungen zwischen Bildern (Dauer konfigurierbar, abschaltbar). |
-| FA-07 | SOLL | Einblendbare Zusatzinformationen: Uhrzeit, Datum, optional Dateiname/Aufnahmedatum des Fotos (einzeln zu-/abschaltbar). Erweitert durch E-19 um die beiden Schaltflaechen oben rechts. |
+| FA-07 | SOLL | Einblendbare Zusatzinformationen: Uhrzeit, Datum, optional Dateiname/Aufnahmedatum des Fotos (einzeln zu-/abschaltbar). Erweitert durch E-19 um die beiden Schaltflaechen oben rechts. Die Uhr steht wahlweise als Ziffern oder als Zeiger (E-20). |
 | FA-08 | SOLL | Bei Hochformatfotos auf Querformat-Display: zwei Hochformatbilder nebeneinander anzeigen (Paar-Modus). |
 | FA-09 | KANN | HEIC/HEIF wird **nicht nativ dekodiert** (Entscheidung E-04): Für Nextcloud-Quellen liefert die Preview-API JPEG-Versionen auch von HEIC-Originalen; HEIC-Dateien aus lokalen/NAS-Quellen werden übersprungen und im Log vermerkt. |
 | FA-10 | KANN | „Ken-Burns-Effekt" (langsames Zoomen/Schwenken) als optionaler Anzeigemodus. |
@@ -91,7 +91,7 @@ Priorisierung: **MUSS** (zwingend), **SOLL** (wichtig, verhandelbar), **KANN** (
 | Nr. | Prio | Anforderung |
 |---|---|---|
 | FA-40 | MUSS | Einstellungen sind direkt auf dem Tablet über eine Touch-Oberfläche erreichbar (z. B. Tippen/Wischen holt ein Menü hervor). |
-| FA-41 | MUSS | Während der Diashow: Wischgesten für vor/zurück, Tippen für Pause/Weiter. Konkretisiert durch E-18: zusätzlich Tippzonen (links zurück, Mitte Pause, rechts weiter). |
+| FA-41 | MUSS | Während der Diashow: Wischgesten für vor/zurück, Tippen für Pause/Weiter. Konkretisiert durch E-18: zusätzlich Tippzonen (links zurück, Mitte Pause, rechts weiter). Die Pause wird dauerhaft angezeigt, solange sie gilt (E-21). |
 | FA-42 | MUSS | Alle Einstellungen und Quellen-Konfigurationen überleben App- und Geräteneustart. |
 | FA-43 | SOLL | Versehentliche Bedienung ist erschwert (z. B. Einstellungen erst nach Doppeltipp oder langem Druck erreichbar). |
 | FA-44 | — | *Entfällt als eigene Anforderung* (Entscheidung E-09): Fernzugriff auf Grundeinstellungen (Intervall, Zeitplan, Sync anstoßen, Bildschirm an/aus) erfolgt über die REST-Endpunkte aus FA-55; keine eigene Weboberfläche. |
@@ -103,9 +103,9 @@ Priorisierung: **MUSS** (zwingend), **SOLL** (wichtig, verhandelbar), **KANN** (
 |---|---|---|
 | FA-50 | MUSS | Der Bildschirm bleibt während der Diashow dauerhaft an (Wakelock / FLAG_KEEP_SCREEN_ON). |
 | FA-51 | — | *Entfällt* (Entscheidung E-01): Kein automatischer Start nach dem Booten; nach einem Neustart/Stromausfall wird die App manuell gestartet. Die laufende App muss die Diashow nach App-Start ohne weitere Interaktion beginnen. |
-| FA-52 | MUSS | Zeitplan: Konfigurierbare Aktiv-Zeiten (z. B. 07:00–22:00 Uhr); außerhalb wird der Bildschirm geschwärzt bzw. die Helligkeit maximal reduziert. |
-| FA-53 | SOLL | Helligkeitssteuerung: manuelle Einstellung in der App; optional automatische Absenkung in Abendstunden. |
-| FA-54 | SOLL | Nachtmodus zeigt optional eine dunkle Uhr statt eines komplett schwarzen Bildschirms. |
+| FA-52 | MUSS | Zeitplan: Konfigurierbare Aktiv-Zeiten (z. B. 07:00–22:00 Uhr); außerhalb wird der Bildschirm geschwärzt bzw. die Helligkeit maximal reduziert. Bei gerätegesteuerter Helligkeit (E-22) wird nur geschwärzt. |
+| FA-53 | SOLL | Helligkeitssteuerung: manuelle Einstellung in der App; optional automatische Absenkung in Abendstunden. Alternativ gibt die App die Regelung vollständig an das Gerät ab (E-22); der Schalter dafür ist auch über FA-55 erreichbar. |
+| FA-54 | SOLL | Nachtmodus zeigt optional eine dunkle Uhr statt eines komplett schwarzen Bildschirms. Ihre Darstellung wird getrennt von der Tagesuhr gewählt (E-20). |
 | FA-55 | SOLL | Steuerung über das Heimnetz (einfache REST-Endpunkte oder MQTT) zur Integration in Home Assistant: Diashow an/aus, Bildschirm an/aus. Ersetzt die gestrichene Kamera-Präsenzerkennung (Entscheidung E-05) – ein vorhandener Smart-Home-Bewegungsmelder übernimmt das Aufwecken. Zusätzlich stellen die REST-Endpunkte Grundeinstellungen bereit (Intervall, Zeitplan, Sync anstoßen; Entscheidung E-09). |
 | FA-56 | — | *Entfällt* (Entscheidung E-05): Keine Präsenzerkennung per Frontkamera (hoher Aufwand: eigenes CameraX-Plugin; Privatsphäre); Funktion wird durch FA-55 abgedeckt. |
 
@@ -236,6 +236,9 @@ Prüfung aller Anforderungen gegen den aktuellen Stand von Tauri 2 auf Android. 
 | E-16 | Ablage des nativen Android-Codes | **Versioniert in `src-tauri/android-src/`, per Skript nach `gen/` gespiegelt** | `src-tauri/gen/` ist generiert und gitignored; handgeschriebener Code dort ginge bei `tauri android init` unbemerkt verloren. Für Slowshow kritisch, weil FA-01, FA-50 und FA-53 genau dort liegen. `scripts/patch-android.mjs` spielt den Code ein, ergänzt das Manifest und prüft das Ergebnis; es läuft vor jedem Android-Build und in der CI. |
 | E-19 | Schaltflaechen in der Diashow | **Zahnrad und durchgestrichenes Auge, einzeln abschaltbar** | Der Entwurf sieht im Artboard „Diashow“ keine Schaltflaechen vor. Zwei sind trotzdem sinnvoll: ein kurzer Weg in die Einstellungen (FA-40) und das Ausblenden des laufenden Bildes (FA-30) — letzteres ist nur im Moment des Anschauens praktisch. Beide sind wie Uhr und Datum einzeln abschaltbar (FA-07); wer den Rahmen puristisch will, blendet sie aus und nutzt den langen Druck. Zuvor trugen sie das „System“-Symbol aus der Navigation (Kreis mit Strahlen) und ein Minus — beides las sich falsch, das eine als Helligkeit, das andere als gar nichts. |
 | E-18 | Bedienung der Diashow | **Tippzonen zusätzlich zum Wischen** | FA-41 verlangt „Wischgesten für vor/zurück, Tippen für Pause/Weiter". Wischen bleibt; ergänzt werden drei Tippzonen: linkes Drittel zurück, Mitte Pause, rechtes Drittel weiter. Auf einem an der Wand hängenden Rahmen ist ein kurzer Tipp bequemer als eine Wischbewegung — und die großzügige Mitte fängt Fehlgriffe auf die harmlose Aktion. Drittel, weil das die verbreitete Aufteilung ist (E-Book-Leser) und damit am wenigsten überrascht. Langer Druck öffnet weiterhin die Einstellungen (FA-43). |
+| E-20 | Analoguhr | **Getrennt schaltbar, Strichindex, ohne Sekundenzeiger** | Drei Teilfragen, einzeln entschieden. *Ort:* Diashow (FA-07) und Nachtmodus (FA-54) bekommen je einen eigenen Schalter — analog nachts neben digital tagsüber ist eine sinnvolle Kombination, kein Widerspruch. *Stil:* dünner Ring mit zwölf Marken, die auf zwölf/drei/sechs/neun länger; kein Zifferblatt mit Ziffern. Ziffern in der Display-Serife wären die auffälligste Variante gewesen — auf einem Rahmen, dessen Fotos der einzige helle Bereich sein sollen, ist das zu viel. *Sekundenzeiger:* keiner. `useNow` taktet bewusst nur auf die volle Minute (NF-06); ein Sekundenzeiger hielte die WebView rund um die Uhr im Sekundentakt am Zeichnen. Der Stundenzeiger wandert dafür stufenlos mit der Minute mit, sonst stünde er bei einer Uhr ohne Ziffern schlicht falsch. Zum Einbrennen (NF-07): eine Analoguhr ist nicht automatisch besser als eine digitale — die Zeiger rotieren zwar, Ring und Marken stehen aber dauerhaft. Der Pixel-Shift gilt unverändert. |
+| E-21 | Anzeige der Pause | **Dauerhaftes Abzeichen statt kurzer Einblendung** | Bisher erschien „Pausiert" für gut zwei Sekunden und verschwand. Ein Rahmen, der stehenbleibt, sieht danach aus wie einer, der hängt — der Hinweis war genau dann weg, wenn später jemand davorstand. Das Abzeichen steht oben in der Mitte, solange die Pause gilt, in Messing statt Off-White: es meldet einen Zustand, keine Meldung. Nicht im Nachtmodus, dort soll der Schirm dunkel bleiben (FA-54). Es wandert wie die übrigen Einblendungen (NF-07) — eine Pause kann Tage dauern. |
+| E-22 | Gerätegesteuerte Helligkeit | **Zusätzliche Option, die die Regelung vollständig abgibt — auch nachts** | FA-53 sah nur die Steuerung *durch* die App vor. Wer die Helligkeitsautomatik des Geräts bevorzugt, schaltet sie nun ein; die App setzt dann in **keinem** Zustand mehr eine Fensterhelligkeit (`BRIGHTNESS_OVERRIDE_NONE`) — weder tagsüber, noch nachts, noch auf einen Schlafbefehl aus dem Heimnetz. Eine Ausnahme „nur nachts doch" wäre nicht zu erklären: der Rahmen verhielte sich abends anders als morgens, ohne dass jemand etwas umgestellt hätte. Die abendliche Absenkung entfällt ebenfalls — sie würde gegen die Systemautomatik arbeiten — und die zugehörigen Regler werden ausgeblendet statt wirkungslos stehenzubleiben. **FA-52 bleibt trotzdem erfüllt:** außerhalb der Aktivzeit legt die Oberfläche den Schirm auf Schwarz (`dimOpacity` in `src/lib/dim.ts`). Geschwärzt wird der Inhalt, nur eben nicht zusätzlich die Hintergrundbeleuchtung. Technisch reist der Zustand als Wert `0` im vorhandenen Helligkeitsfeld statt als zweites Feld: die Helligkeit läuft über das Anzeige-Ereignis, REST (FA-55) und MQTT, und ein zusätzliches Feld wäre an jeder Stelle, die es übersieht, stumm wirkungslos. Der Schalter selbst ist fernsteuerbar — über REST als `deviceBrightness` und über MQTT als `cmd/device_brightness` mit eigener Discovery-Entität: wer die Helligkeit in Home Assistant automatisiert, muss die Automatik auch von dort umlegen können. |
 | E-17 | Umsetzungsstufe NF-05 | **Noch offen** – siehe Abschnitt 10 | Umgesetzt ist AES-256-GCM (reines Rust) mit Schlüsseldatei im App-privaten Verzeichnis. Die Keystore-Bindung fehlt noch; die Trennlinie dafür ist der `KeyProvider`-Trait in `src-tauri/src/secrets.rs`. |
 
 ## 10. Offene Punkte
@@ -264,7 +267,7 @@ Empfehlung zur Diskussion: A für M2, B als Ausbauoption nach dem Dauertest — 
 
 ## 11. Umsetzungsstand
 
-Stand 29. August 2026. Geprüft durch 175 Rust- und 54 Frontend-Tests sowie Clippy ohne Warnungen; die Angaben zu Verhalten auf echter Hardware stehen unter dem Vorbehalt des noch fehlenden Referenzgeräts (E-10).
+Stand 30. August 2026. Geprüft durch 207 Rust- und 79 Frontend-Tests sowie Clippy ohne Warnungen. Seit 11.4 laufen die Angaben zum Verhalten auf einem echten Tablet statt auf einem Telefon; ein Gerät nach RB-02 ist es weiterhin nicht (E-10).
 
 ### 11.1 Ergebnis der Code-Durchsicht
 
@@ -313,6 +316,23 @@ Ordner wählen, synchronisieren, Diashow. Der brach bisher am Serde-Fehler ab
 und ist nach dem Fix zu wiederholen.
 
 **Nachträglich geschlossen:** Die native Hälfte von FA-53 hatte keinen Aufrufer — `MainActivity.setScreenBrightness` war geschrieben, aber nie verbunden. Die Brücke liegt jetzt in `src-tauri/src/brightness.rs` (JNI, nur für Android übersetzt) und wird bei jeder Änderung des Anzeigezustands aufgerufen. Sie übersetzt für das Android-Ziel; die Wirkung auf dem Display ist erst am Referenzgerät prüfbar (E-10).
+
+### 11.4 Erster Lauf auf einem Tablet
+
+Testgerät: Xiaomi Pad 6 (`pipa`), Android 14, HyperOS `OS2.0.16.0.UMZMIXM`,
+2880 × 1800 bei 400 dpi. Näher an RB-02 als das Telefon aus 11.2, aber
+weiterhin kein Referenzgerät.
+
+| Befund | Ursache | Behoben durch |
+|---|---|---|
+| **Installation per ADB abgewiesen** | `INSTALL_FAILED_USER_RESTRICTED`. Kein Fehler der App, sondern die HyperOS-Sperre für Installationen über USB — sie verlangt ein angemeldetes Mi-Konto. | Entwickleroption „USB-Installation" freigeschaltet; keine Codeänderung. Für Geräte ohne Mi-Konto bleibt der Weg über den Dateimanager. |
+| **Schwarzer Streifen am oberen Rand** | `body` trug `padding: env(safe-area-inset-*)` mit dem Kommentar „Vollbild bis in die Aussparungen" — die Polsterung bewirkt das Gegenteil. Trotz Immersive-Modus meldet die WebView weiterhin die Höhe der Statusleiste als oberen Inset (60 px). Das Foto saß dadurch 60 px zu tief: gemessen 549 px Rand oben gegen 489 px unten. Verstößt gegen FA-01. | Polsterung aus `body` entfernt; die Einstellungen polstern sich selbst, damit Bedienelemente nicht unter eine Aussparung geraten. Am Gerät nachgemessen. |
+| **Kamera-Dienst beim Start** | Die WebView-Initialisierung zählt Kameras auf (`Start proc com.android.camera … caller=dev.kerker.slowshow`), was `Long monitor contention … onTorchStatusChanged for 705ms` auslöst. Chromiums Verhalten, nicht unseres. | Nicht behoben — nur festgehalten. Rund 0,7 s zusätzliche Startzeit; im Dauerbetrieb ohne Bedeutung, beim Entwickeln störend. |
+
+**Auf dem Gerät bestätigt:** Diashow läuft mit einer echten Nextcloud-Quelle
+über WebDAV, Sync und Cache greifen, Uhr und Datumszeile stehen wie im
+Entwurf. Damit ist der in 11.3 als offen vermerkte erste vollständige
+Durchlauf — Ordner wählen, synchronisieren, Diashow — nachgeholt.
 
 | Bereich | Anforderungen | Stand | Ort im Code |
 |---|---|---|---|

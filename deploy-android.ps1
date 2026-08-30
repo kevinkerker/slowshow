@@ -53,7 +53,14 @@ if ($dev) {
 # Den tatsaechlich erzeugten Dateinamen suchen statt ihn zu raten:
 # ohne Signaturschluessel heisst das Release-APK "…-release-unsigned.apk",
 # mit Schluessel "…-release.apk".
-$apk = Get-ChildItem -Path "$outputs\*\$variant" -Filter "*.apk" -ErrorAction SilentlyContinue |
+#
+# Das Muster gehoert in den Pfad, nicht in -Filter: in Windows PowerShell 5.1
+# liefert `Get-ChildItem -Path "…\*\debug" -Filter "*.apk"` nichts. Loest der
+# Pfad selbst auf ein Verzeichnis auf, prueft -Filter den Verzeichnisnamen
+# gegen das Muster statt dessen Inhalt — "debug" ist kein "*.apk", also bleibt
+# das Ergebnis leer. Ohne -ErrorAction faellt das auf; mit ihm sah es aus, als
+# haette der Build kein APK erzeugt.
+$apk = Get-ChildItem -Path "$outputs\*\$variant\*.apk" -ErrorAction SilentlyContinue |
        Sort-Object LastWriteTime -Descending |
        Select-Object -First 1
 

@@ -18,8 +18,44 @@ pub struct DisplayState {
     pub slideshow_active: bool,
     /// Statt Schwarz eine gedimmte Uhr zeigen (FA-54).
     pub show_night_clock: bool,
-    /// Zielhelligkeit in Prozent (FA-53).
+    /// Zielhelligkeit in Prozent (FA-53), oder [`DEVICE_CONTROLLED`].
     pub brightness: u8,
+}
+
+/// „Die App regelt die Helligkeit nicht" (E-22).
+///
+/// Als Wert im selben Feld statt als zweites Feld: die Helligkeit reist durch
+/// das Ereignis `slowshow://display`, über die REST-Schnittstelle (FA-55) und
+/// nach MQTT. Ein zusätzliches Feld müsste überall mitgeführt werden und wäre
+/// an jeder Stelle, die es übersieht, stumm wirkungslos. Null liegt außerhalb
+/// des gültigen Bereichs 1..=100 und kann deshalb nichts anderes bedeuten.
+pub const DEVICE_CONTROLLED: u8 = 0;
+
+/// Helligkeit außerhalb der Aktivzeit (FA-52).
+///
+/// 1 statt 0, weil 0 auf manchen Geräten die Hintergrundbeleuchtung ganz
+/// abschaltet und das Aufwecken per FA-55 dann nicht mehr sichtbar wäre — und
+/// weil 0 seit E-22 „Gerät regelt selbst" bedeutet.
+pub const NIGHT_BRIGHTNESS: u8 = 1;
+
+/// Filtert jede Helligkeit, die die App setzen möchte (E-22).
+///
+/// Überlässt der Nutzer die Regelung dem Gerät, gibt die App sie in **jedem**
+/// Zustand ab — auch nachts und auch auf einen Schlafbefehl aus dem Heimnetz
+/// hin. Eine Ausnahme „nur nachts doch" wäre nicht zu erklären: der Rahmen
+/// verhielte sich dann abends anders als morgens, ohne dass jemand etwas
+/// umgestellt hätte.
+///
+/// FA-52 bleibt trotzdem erfüllt, ohne die Beleuchtung anzufassen: außerhalb
+/// der Aktivzeit legt die Oberfläche den Schirm auf Schwarz (`dimOpacity` in
+/// `src/lib/dim.ts`). Geschwärzt wird also der Inhalt — nur eben nicht
+/// zusätzlich die Hintergrundbeleuchtung.
+pub fn app_brightness(b: &BrightnessConfig, wanted: u8) -> u8 {
+    if b.device_controlled {
+        DEVICE_CONTROLLED
+    } else {
+        wanted
+    }
 }
 
 /// Zerlegt "HH:MM" in Minuten seit Mitternacht.
@@ -83,6 +119,13 @@ const DEFAULT_DIM_UNTIL: &str = "06:00";
 ///
 /// Ohne Zeitplan gibt es keine Aufwachzeit, dann gilt [`DEFAULT_DIM_UNTIL`].
 pub fn active_brightness(b: &BrightnessConfig, schedule: &ScheduleConfig, now_minutes: u32) -> u8 {
+    // Überlässt der Nutzer die Regelung dem Gerät, hat die App hier nichts zu
+    // bestimmen — auch nicht die abendliche Absenkung, die sonst gegen die
+    // Automatik des Systems arbeiten würde (E-22). Dieselbe Regel wie in
+    // `app_brightness`, nur früher: der Rest der Funktion wäre gegenstandslos.
+    if b.device_controlled {
+        return DEVICE_CONTROLLED;
+    }
     if !b.auto_dim {
         return b.level;
     }
@@ -110,6 +153,14 @@ pub fn active_brightness(b: &BrightnessConfig, schedule: &ScheduleConfig, now_mi
     }
 }
 
+/// Helligkeit beim Wecken über die Heimnetz-Steuerung (FA-55).
+///
+/// Bewusst ohne Zeitplan und ohne Abendabsenkung: „Bildschirm an" heißt, dass
+/// jemand den Rahmen jetzt sehen will.
+pub fn wake_brightness(b: &BrightnessConfig) -> u8 {
+    app_brightness(b, b.level)
+}
+
 /// Gesamtzustand aus Zeitplan und Helligkeit.
 pub fn evaluate(config: &AppConfig, now_minutes: u32) -> DisplayState {
     if is_active(&config.schedule, now_minutes) {
@@ -123,10 +174,10 @@ pub fn evaluate(config: &AppConfig, now_minutes: u32) -> DisplayState {
             slideshow_active: false,
             show_night_clock: config.schedule.night_clock,
             // FA-52: außerhalb der Aktivzeit „Bildschirm geschwärzt bzw.
-            // Helligkeit maximal reduziert". 1 statt 0, weil 0 auf manchen
-            // Geräten die Hintergrundbeleuchtung ganz abschaltet und das
-            // Aufwecken per FA-55 dann nicht mehr sichtbar wäre.
-            brightness: 1,
+            // Helligkeit maximal reduziert". Den Inhalt schwärzt in jedem Fall
+            // die Oberfläche; die Beleuchtung senkt die App nur, solange sie
+            // sie überhaupt regeln darf (E-22).
+            brightness: app_brightness(&config.brightness, NIGHT_BRIGHTNESS),
         }
     }
 }
@@ -214,6 +265,7 @@ mod tests {
             active_from: "07:00".into(),
             active_to: "22:00".into(),
             night_clock: true,
+            ..Default::default()
         };
         assert!(is_active(&s, hm(12, 0)));
         assert!(!is_active(&s, hm(23, 0)));
@@ -228,6 +280,7 @@ mod tests {
             active_from: "kaputt".into(),
             active_to: "22:00".into(),
             night_clock: true,
+            ..Default::default()
         };
         assert!(is_active(&s, hm(3, 0)));
     }
@@ -257,6 +310,7 @@ mod tests {
             auto_dim: true,
             dim_from: "20:00".into(),
             dim_level: 30,
+            ..Default::default()
         };
         let s = kein_zeitplan();
         assert_eq!(active_brightness(&b, &s, hm(19, 59)), 100);
@@ -278,6 +332,7 @@ mod tests {
             auto_dim: true,
             dim_from: "20:00".into(),
             dim_level: 30,
+            ..Default::default()
         };
         let s = kein_zeitplan();
         assert_eq!(active_brightness(&b, &s, hm(0, 0)), 30);
@@ -297,12 +352,14 @@ mod tests {
             auto_dim: true,
             dim_from: "20:00".into(),
             dim_level: 30,
+            ..Default::default()
         };
         let s = ScheduleConfig {
             enabled: true,
             active_from: "09:00".into(),
             active_to: "23:00".into(),
             night_clock: true,
+            ..Default::default()
         };
         assert_eq!(active_brightness(&b, &s, hm(2, 0)), 30);
         assert_eq!(active_brightness(&b, &s, hm(8, 59)), 30);
@@ -317,12 +374,14 @@ mod tests {
             auto_dim: true,
             dim_from: "09:00".into(),
             dim_level: 20,
+            ..Default::default()
         };
         let s = ScheduleConfig {
             enabled: true,
             active_from: "09:00".into(),
             active_to: "23:00".into(),
             night_clock: true,
+            ..Default::default()
         };
         assert_eq!(active_brightness(&b, &s, hm(12, 0)), 100);
         assert_eq!(active_brightness(&b, &s, hm(22, 0)), 100);
@@ -335,6 +394,7 @@ mod tests {
             auto_dim: true,
             dim_from: "20:00".into(),
             dim_level: 60,
+            ..Default::default()
         };
         assert_eq!(
             active_brightness(&b, &kein_zeitplan(), hm(21, 0)),
@@ -351,6 +411,7 @@ mod tests {
                 active_from: "07:00".into(),
                 active_to: "22:00".into(),
                 night_clock: true,
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -370,6 +431,110 @@ mod tests {
     }
 
     #[test]
+    fn geraetesteuerung_gibt_die_helligkeit_frei_e_22() {
+        let b = BrightnessConfig {
+            level: 40,
+            device_controlled: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            active_brightness(&b, &kein_zeitplan(), hm(12, 0)),
+            DEVICE_CONTROLLED,
+            "die eingestellte Grundhelligkeit gilt nicht mehr"
+        );
+    }
+
+    #[test]
+    fn geraetesteuerung_schaltet_die_abendabsenkung_ab_e_22() {
+        // Sonst arbeitete die Absenkung gegen die Systemautomatik: die App
+        // setzte abends 30 %, das Gerät regelte dagegen wieder hoch.
+        let b = BrightnessConfig {
+            level: 100,
+            auto_dim: true,
+            dim_from: "20:00".into(),
+            dim_level: 30,
+            device_controlled: true,
+        };
+        let s = ScheduleConfig {
+            enabled: true,
+            active_from: "07:00".into(),
+            active_to: "22:00".into(),
+            ..Default::default()
+        };
+        assert_eq!(active_brightness(&b, &s, hm(21, 0)), DEVICE_CONTROLLED);
+    }
+
+    #[test]
+    fn wecken_laesst_dem_geraet_die_regelung_e_22() {
+        let b = BrightnessConfig {
+            level: 80,
+            device_controlled: true,
+            ..Default::default()
+        };
+        assert_eq!(wake_brightness(&b), DEVICE_CONTROLLED);
+
+        let b = BrightnessConfig {
+            level: 80,
+            device_controlled: false,
+            ..Default::default()
+        };
+        assert_eq!(wake_brightness(&b), 80, "sonst gilt die Grundhelligkeit");
+    }
+
+    #[test]
+    fn geraetesteuerung_gilt_auch_nachts_e_22() {
+        // Die App fasst die Beleuchtung in keinem Zustand mehr an. FA-52 wird
+        // dann nicht ueber die Helligkeit erfuellt, sondern ueber das schwarze
+        // Overlay der Oberflaeche — siehe `dimOpacity` in `src/lib/dim.ts`.
+        let c = AppConfig {
+            schedule: ScheduleConfig {
+                enabled: true,
+                active_from: "07:00".into(),
+                active_to: "22:00".into(),
+                ..Default::default()
+            },
+            brightness: BrightnessConfig {
+                device_controlled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(evaluate(&c, hm(12, 0)).brightness, DEVICE_CONTROLLED);
+        assert_eq!(evaluate(&c, hm(23, 0)).brightness, DEVICE_CONTROLLED);
+        assert!(
+            !evaluate(&c, hm(23, 0)).slideshow_active,
+            "der Zeitplan gilt weiterhin, nur die Helligkeit nicht"
+        );
+    }
+
+    #[test]
+    fn ohne_geraetesteuerung_senkt_der_zeitplan_die_helligkeit_fa_52() {
+        let c = AppConfig {
+            schedule: ScheduleConfig {
+                enabled: true,
+                active_from: "07:00".into(),
+                active_to: "22:00".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(evaluate(&c, hm(23, 0)).brightness, NIGHT_BRIGHTNESS);
+    }
+
+    #[test]
+    fn app_brightness_reicht_ohne_geraetesteuerung_durch() {
+        let b = BrightnessConfig::default();
+        assert_eq!(app_brightness(&b, 42), 42);
+
+        let b = BrightnessConfig {
+            device_controlled: true,
+            ..Default::default()
+        };
+        assert_eq!(app_brightness(&b, 42), DEVICE_CONTROLLED);
+    }
+
+    #[test]
     fn evaluate_ohne_nachtuhr_bleibt_schwarz() {
         let c = AppConfig {
             schedule: ScheduleConfig {
@@ -377,6 +542,7 @@ mod tests {
                 active_from: "07:00".into(),
                 active_to: "22:00".into(),
                 night_clock: false,
+                ..Default::default()
             },
             ..Default::default()
         };

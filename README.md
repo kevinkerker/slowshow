@@ -210,9 +210,14 @@ Endpunkte: `GET /api/status`, `POST /api/slideshow`, `POST /api/screen`,
 `GET|POST /api/config`. Ist ein Token gesetzt, muss es als
 `Authorization: Bearer …` mitgeschickt werden.
 
+`POST /api/config` nimmt einzelne Felder, darunter `brightness` und
+`deviceBrightness` — Letzteres gibt die Helligkeitsregelung an das Tablet
+zurück (E-22).
+
 Fertige Konfiguration für Home Assistant — Sensoren, Schalter und
 Automatisierungen: [docs/home-assistant.md](docs/home-assistant.md).
-**MQTT gibt es nicht**, die Anbindung läuft über REST.
+Neben REST gibt es eine MQTT-Anbindung mit Discovery: die Entitäten
+erscheinen in Home Assistant von selbst, ohne YAML.
 
 Damit ersetzt ein vorhandener Bewegungsmelder im Smart Home die
 Präsenzerkennung per Kamera, die im Lastenheft bewusst gestrichen wurde (E-05).

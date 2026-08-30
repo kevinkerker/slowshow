@@ -3,18 +3,22 @@
  * Uhrzeit und Datum unten links (FA-07, Artboard „Diashow").
  *
  * Beide Zeilen sind einzeln abschaltbar; die Gruppe wandert langsam gegen das
- * Einbrennen (NF-07).
+ * Einbrennen (NF-07). Die Uhr steht wahlweise als Ziffern oder als Zeiger
+ * (E-20) — der Nachtmodus wird getrennt eingestellt.
  */
 import { computed, toRef } from 'vue'
+import AnalogClock from './AnalogClock.vue'
 import { useNow } from '@/composables/useNow'
 import { usePixelShift } from '@/composables/usePixelShift'
 import { formatClock, formatDateLine } from '@/lib/format'
 import { localeTag } from '@/lib/i18n'
 import type { Language } from '@/lib/i18n'
+import type { ClockStyle } from '@/lib/types'
 
 const props = defineProps<{
   showClock: boolean
   showDate: boolean
+  clockStyle: ClockStyle
   pixelShift: boolean
   language: Language
 }>()
@@ -28,7 +32,12 @@ const date = computed(() => formatDateLine(now.value, localeTag(props.language))
 
 <template>
   <div v-if="showClock || showDate" class="clock" :style="{ transform }">
-    <div v-if="showClock" class="time">{{ time }}</div>
+    <template v-if="showClock">
+      <div v-if="clockStyle === 'analog'" class="dial">
+        <AnalogClock :date="now" />
+      </div>
+      <div v-else class="time">{{ time }}</div>
+    </template>
     <div v-if="showDate" class="date">{{ date }}</div>
   </div>
 </template>
@@ -58,6 +67,17 @@ const date = computed(() => formatDateLine(now.value, localeTag(props.language))
   text-shadow: 0 1px 24px rgba(0, 0, 0, 0.45);
 }
 
+/* Die Analoguhr braucht mehr Fläche als die Textzeile, sonst ist der
+   Strichindex nicht mehr zu erkennen. Der Schlagschatten entspricht dem
+   `text-shadow` der Ziffern — über einem hellen Foto wäre sie sonst weg. */
+.dial {
+  width: 150px;
+  height: 150px;
+  margin-bottom: 10px;
+  color: var(--ss-text);
+  filter: drop-shadow(0 1px 16px rgba(0, 0, 0, 0.5));
+}
+
 .date {
   font-size: 15px;
   font-weight: 500;
@@ -70,6 +90,11 @@ const date = computed(() => formatDateLine(now.value, localeTag(props.language))
 @media (max-width: 900px) {
   .time {
     font-size: 64px;
+  }
+
+  .dial {
+    width: 112px;
+    height: 112px;
   }
 
   .date {
@@ -86,6 +111,12 @@ const date = computed(() => formatDateLine(now.value, localeTag(props.language))
 
   .time {
     font-size: 48px;
+  }
+
+  .dial {
+    width: 84px;
+    height: 84px;
+    margin-bottom: 6px;
   }
 }
 </style>

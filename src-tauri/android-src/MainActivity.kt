@@ -111,7 +111,12 @@ class MainActivity : TauriActivity() {
      * Systemeinstellung nicht — genau das gewünschte Verhalten für einen
      * Zeitplan, der abends abdunkelt (FA-52).
      *
-     * @param level Helligkeit in Prozent (1..100).
+     * @param level Helligkeit in Prozent (1..100), oder 0 für „Gerät regelt
+     *   selbst" (E-22). Bei 0 gibt das Fenster den Override mit
+     *   `BRIGHTNESS_OVERRIDE_NONE` zurück, und die Helligkeitsautomatik des
+     *   Systems greift wieder. Ohne diesen Weg bliebe die zuletzt gesetzte
+     *   Helligkeit stehen, solange die App im Vordergrund ist — das Abschalten
+     *   der Steuerung hätte dann sichtbar keine Wirkung.
      */
     // @Keep ist keine Kosmetik: die Methode wird ausschließlich über JNI
     // gerufen, R8 sieht im Release-Build also keinen Aufrufer und würde sie
@@ -119,10 +124,14 @@ class MainActivity : TauriActivity() {
     // fertigen Gerät fehl, nicht im Debug-Build.
     @Keep
     fun setScreenBrightness(level: Int) {
-        val clamped = level.coerceIn(1, 100)
+        val value = if (level <= 0) {
+            WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        } else {
+            level.coerceIn(1, 100) / 100f
+        }
         runOnUiThread {
             val params = window.attributes
-            params.screenBrightness = clamped / 100f
+            params.screenBrightness = value
             window.attributes = params
         }
     }

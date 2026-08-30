@@ -12,6 +12,9 @@ export type PlayOrder = 'random' | 'fileName' | 'takenAt' | 'modified'
 /** Darstellung bei abweichendem Seitenverhältnis (FA-05). */
 export type FitMode = 'contain' | 'cover'
 
+/** Ziffern oder Zeiger (E-20). Gegenstück zu `model::ClockStyle`. */
+export type ClockStyle = 'digital' | 'analog'
+
 export interface TransitionConfig {
   /** Weiche Überblendungen (FA-06). */
   enabled: boolean
@@ -30,6 +33,8 @@ export interface OverlayConfig {
   showSettingsButton: boolean
   /** Durchgestrichenes Auge — Bild aus der Diashow nehmen (FA-30). */
   showExcludeButton: boolean
+  /** Ziffern oder Zeiger für die Uhr über dem Foto (E-20). */
+  clockStyle: ClockStyle
 }
 
 /** Aktivzeiten und Nachtmodus (FA-52, FA-54). */
@@ -38,6 +43,8 @@ export interface ScheduleConfig {
   activeFrom: string
   activeTo: string
   nightClock: boolean
+  /** Ziffern oder Zeiger für die Nachtuhr (E-20). */
+  nightClockStyle: ClockStyle
 }
 
 /** Helligkeitssteuerung (FA-53). */
@@ -46,7 +53,15 @@ export interface BrightnessConfig {
   autoDim: boolean
   dimFrom: string
   dimLevel: number
+  /** Das Gerät regelt die Helligkeit selbst (E-22). */
+  deviceControlled: boolean
 }
+
+/**
+ * `DisplayState.brightness`, wenn die App die Helligkeit nicht regelt (E-22).
+ * Gegenstück zu `schedule::DEVICE_CONTROLLED`.
+ */
+export const DEVICE_CONTROLLED_BRIGHTNESS = 0
 
 /** Cache-Ringpuffer und Prefetch (FA-27, FA-31, NF-12). */
 export interface CacheConfig {

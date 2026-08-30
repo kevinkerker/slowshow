@@ -90,11 +90,20 @@ mod android {
             }
         };
 
+        // 0 wird durchgereicht statt auf 1 geklemmt: es ist der Sentinel aus
+        // `schedule::DEVICE_CONTROLLED` und weist die Activity an, den
+        // Helligkeits-Override wieder abzugeben (E-22).
+        let value = if level == crate::schedule::DEVICE_CONTROLLED {
+            0
+        } else {
+            level.clamp(1, 100) as i32
+        };
+
         if let Err(e) = env.call_method(
             &reg.activity,
             "setScreenBrightness",
             "(I)V",
-            &[JValue::Int(level.clamp(1, 100) as i32)],
+            &[JValue::Int(value)],
         ) {
             log::warn!("Helligkeit: Aufruf fehlgeschlagen: {e}");
             // Eine geworfene Java-Ausnahme muss gelöscht werden, sonst schlägt
@@ -105,6 +114,9 @@ mod android {
 }
 
 /// Setzt die Displayhelligkeit auf `level` Prozent (1..=100).
+///
+/// [`schedule::DEVICE_CONTROLLED`](crate::schedule::DEVICE_CONTROLLED) gibt die
+/// Regelung an das Gerät zurück, statt eine Helligkeit zu erzwingen (E-22).
 ///
 /// Auf allen Plattformen außer Android ein No-op — der Desktop-Build ist
 /// ohnehin kein Abnahmegegenstand (Lastenheft 1.3).

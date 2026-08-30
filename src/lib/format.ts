@@ -12,6 +12,32 @@ export function formatClock(date: Date): string {
   return `${h}:${m}`
 }
 
+/** Zeigerstellung der Analoguhr in Grad, im Uhrzeigersinn ab zwölf (E-20). */
+export interface ClockAngles {
+  hour: number
+  minute: number
+}
+
+/**
+ * Zeigerwinkel aus einer Uhrzeit (E-20).
+ *
+ * Der Stundenzeiger wandert mit der Minute mit (30° je Stunde plus 0,5° je
+ * Minute) statt stündlich zu springen. Ohne das stünde er um 11:59 noch exakt
+ * auf der Elf — bei einer Uhr ohne Ziffern ist das nicht ablesbar, sondern
+ * schlicht falsch.
+ *
+ * Einen Sekundenzeiger gibt es bewusst nicht: `useNow` taktet nur auf die
+ * volle Minute, damit die App im Dauerbetrieb nicht sekündlich aufwacht
+ * (NF-06).
+ */
+export function clockAngles(date: Date): ClockAngles {
+  const minutes = date.getMinutes()
+  return {
+    hour: (date.getHours() % 12) * 30 + minutes * 0.5,
+    minute: minutes * 6,
+  }
+}
+
 /**
  * Datumszeile im Stil des Entwurfs: "Samstag · 29. August".
  *

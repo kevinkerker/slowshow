@@ -140,6 +140,19 @@ pub fn discovery(topics: &Topics, prefix: &str) -> Vec<Discovery> {
         })),
     );
 
+    add(
+        "switch",
+        "device_brightness",
+        common(json!({
+            "name": "Helligkeit vom Gerät",
+            "unique_id": format!("slowshow_{node}_device_brightness"),
+            "state_topic": topics.state,
+            "value_template": "{{ 'ON' if value_json.deviceBrightness else 'OFF' }}",
+            "command_topic": topics.command("device_brightness"),
+            "icon": "mdi:brightness-auto",
+        })),
+    );
+
     // ── Knöpfe ──────────────────────────────────────────────────────────────
     for (object, name, icon) in [
         ("next", "Nächstes Bild", "mdi:skip-next"),
@@ -185,7 +198,10 @@ pub fn discovery(topics: &Topics, prefix: &str) -> Vec<Discovery> {
             "name": "Helligkeit",
             "unique_id": format!("slowshow_{node}_brightness"),
             "state_topic": topics.state,
-            "value_template": "{{ value_json.display.brightness }}",
+            // Die eingestellte Grundhelligkeit, nicht die wirksame aus
+            // `display`: die ist nachts 1 und bei Gerätesteuerung 0 und fiele
+            // damit aus dem Bereich des Reglers (E-22).
+            "value_template": "{{ value_json.brightness }}",
             "command_topic": topics.command("brightness"),
             "min": 1,
             "max": 100,
@@ -311,8 +327,8 @@ mod tests {
         let d = discovery(&t, "homeassistant");
         assert_eq!(
             d.len(),
-            11,
-            "2 Schalter, 3 Knoepfe, 2 Zahlen, 2 Sensoren, 2 Binaersensoren"
+            12,
+            "3 Schalter, 3 Knoepfe, 2 Zahlen, 2 Sensoren, 2 Binaersensoren"
         );
     }
 
@@ -325,6 +341,41 @@ mod tests {
         assert!(topics.contains(&"homeassistant/button/slowshow/sync/config"));
         assert!(topics.contains(&"homeassistant/number/slowshow/interval/config"));
         assert!(topics.contains(&"homeassistant/binary_sensor/slowshow/syncing/config"));
+        assert!(topics.contains(&"homeassistant/switch/slowshow/device_brightness/config"));
+    }
+
+    #[test]
+    fn helligkeitsregler_liest_die_eingestellte_grundhelligkeit_e_22() {
+        // `display.brightness` ist nachts 1 und bei Geraetesteuerung 0 — beides
+        // faellt aus dem Bereich min=1..max=100, den der Regler ankuendigt.
+        // Home Assistant zeigte dann einen Wert, den er selbst nicht annimmt.
+        let t = Topics::new("slowshow");
+        let d = discovery(&t, "homeassistant");
+        let regler = d
+            .iter()
+            .find(|x| x.topic.ends_with("/number/slowshow/brightness/config"))
+            .expect("Helligkeitsregler fehlt");
+        assert_eq!(
+            regler.payload["value_template"], "{{ value_json.brightness }}",
+            "nicht value_json.display.brightness"
+        );
+    }
+
+    #[test]
+    fn geraetesteuerung_haengt_am_richtigen_kommando_e_22() {
+        let t = Topics::new("slowshow");
+        let d = discovery(&t, "homeassistant");
+        let schalter = d
+            .iter()
+            .find(|x| x.topic.ends_with("/switch/slowshow/device_brightness/config"))
+            .expect("Schalter fehlt");
+        assert_eq!(
+            schalter.payload["command_topic"], "slowshow/cmd/device_brightness"
+        );
+        assert_eq!(
+            schalter.payload["value_template"],
+            "{{ 'ON' if value_json.deviceBrightness else 'OFF' }}"
+        );
     }
 
     #[test]

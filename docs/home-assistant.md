@@ -55,6 +55,7 @@ Falls du selbst mitlesen oder ohne Discovery arbeiten willst:
 | `slowshow/cmd/sync` | HA → Rahmen | beliebig |
 | `slowshow/cmd/interval` | HA → Rahmen | Sekunden als Zahl |
 | `slowshow/cmd/brightness` | HA → Rahmen | Prozent als Zahl |
+| `slowshow/cmd/device_brightness` | HA → Rahmen | `ON` / `OFF` |
 | `slowshow/cmd/config` | HA → Rahmen | Teilmenge als JSON (siehe Abschnitt 5) |
 
 Schaltbefehle akzeptieren `ON`/`OFF`, `true`/`false`, `1`/`0` und `an`/`aus`.
@@ -155,7 +156,7 @@ rest:
 
       - name: "Slowshow Helligkeit"
         unique_id: slowshow_brightness
-        value_template: "{{ value_json.display.brightness }}"
+        value_template: "{{ value_json.brightness }}"
         unit_of_measurement: "%"
 
     binary_sensor:
@@ -374,9 +375,18 @@ zusätzliche nächtliche Runde lohnt, wenn dein NAS tagsüber schläft.
   "scheduleEnabled": true,
   "activeFrom": "07:00",
   "activeTo": "22:00",
-  "brightness": 80
+  "brightness": 80,
+  "deviceBrightness": false
 }
 ```
+
+`deviceBrightness: true` gibt die Helligkeitsregelung an das Tablet zurück
+(E-22). Die App setzt dann in **keinem** Zustand mehr eine Helligkeit — auch
+nicht nachts und auch nicht auf `POST /api/screen {"on": false}`. Der Rahmen
+wird außerhalb der Aktivzeit trotzdem schwarz, das erledigt die Oberfläche;
+nur die Hintergrundbeleuchtung bleibt in der Hand des Geräts. `brightness`
+wird währenddessen weiterhin gespeichert, wirkt aber erst wieder, wenn
+`deviceBrightness` auf `false` steht.
 
 Werte außerhalb der zulässigen Bereiche werden geklemmt, nicht abgewiesen: die
 Anzeigedauer bleibt zwischen 5 Sekunden und 30 Minuten (FA-02), die Helligkeit
@@ -390,6 +400,8 @@ Antwort von `GET /api/status`:
   "playing": true,
   "syncing": false,
   "intervalSeconds": 30,
+  "brightness": 100,
+  "deviceBrightness": false,
   "display": { "slideshowActive": true, "showNightClock": false, "brightness": 100 },
   "currentSlide": { "kind": "single", "id": "ea9c9c9a37489830" },
   "cache": { "images": 77, "bytes": 61341696, "maxBytes": 2147483648, "excluded": 0 },
@@ -398,6 +410,11 @@ Antwort von `GET /api/status`:
   ]
 }
 ```
+
+`brightness` ist die *eingestellte* Grundhelligkeit und liegt immer zwischen 1
+und 100 — der richtige Wert für einen Regler. `display.brightness` ist die
+gerade wirksame: nachts `1` und bei gerätegesteuerter Helligkeit `0`. Wer sie
+anzeigt, sollte beide Sonderfälle abfangen.
 
 ---
 

@@ -101,6 +101,11 @@ const title = computed(() => t(`nav.${pane.value}`))
   height: 100%;
   background: var(--ss-bg);
   color: var(--ss-text-body);
+  /* Anders als die Diashow darf die Bedienung nicht unter eine
+     Display-Aussparung geraten. Im Querformat liegen die auf den kurzen
+     Kanten, deshalb zaehlen hier vor allem links und rechts. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
 .head {

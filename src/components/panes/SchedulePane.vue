@@ -10,9 +10,12 @@ import { useI18n } from 'vue-i18n'
 import SettingRow from '../SettingRow.vue'
 import ToggleSwitch from '../ToggleSwitch.vue'
 import { useConfigStore } from '@/stores/config'
+import type { ClockStyle } from '@/lib/types'
 
 const { t } = useI18n()
 const store = useConfigStore()
+
+const CLOCK_STYLES: ClockStyle[] = ['digital', 'analog']
 
 const cfg = computed(() => store.config)
 const active = computed(() => store.display?.slideshowActive ?? true)
@@ -73,57 +76,89 @@ const overnight = computed(() => {
             @update:model-value="(v) => store.patch((d) => (d.schedule.nightClock = v))"
           />
         </SettingRow>
+
+        <!-- Getrennt vom Uhrstil der Diashow (E-20): nachts darf eine andere
+             Uhr stehen als tagsüber. -->
+        <SettingRow v-if="cfg.schedule.nightClock" :label="t('schedule.nightClockStyle')">
+          <div class="ss-segmented">
+            <button
+              v-for="style in CLOCK_STYLES"
+              :key="style"
+              class="ss-segment"
+              :class="{ active: cfg.schedule.nightClockStyle === style }"
+              @click="store.patch((d) => (d.schedule.nightClockStyle = style))"
+            >
+              {{ t(`clock.${style}`) }}
+            </button>
+          </div>
+        </SettingRow>
       </template>
     </section>
 
     <section>
       <h3 class="ss-label">{{ t('schedule.brightness') }}</h3>
 
-      <SettingRow :label="t('schedule.brightness')">
-        <div class="slider">
-          <input
-            type="range"
-            min="5"
-            max="100"
-            step="5"
-            :value="cfg.brightness.level"
-            @change="store.patch((d) => (d.brightness.level = Number(($event.target as HTMLInputElement).value)))"
-          />
-          <span class="value">{{ cfg.brightness.level }} %</span>
-        </div>
-      </SettingRow>
-
-      <SettingRow :label="t('schedule.autoDim')">
+      <!-- Steht vor den übrigen Reglern, weil sie damit gegenstandslos werden
+           (E-22): wer dem Gerät die Regelung überlässt, stellt hier nichts
+           mehr ein. -->
+      <SettingRow
+        :label="t('schedule.deviceBrightness')"
+        :hint="t('schedule.deviceBrightnessHint')"
+      >
         <ToggleSwitch
-          :model-value="cfg.brightness.autoDim"
-          :label="t('schedule.autoDim')"
-          @update:model-value="(v) => store.patch((d) => (d.brightness.autoDim = v))"
+          :model-value="cfg.brightness.deviceControlled"
+          :label="t('schedule.deviceBrightness')"
+          @update:model-value="(v) => store.patch((d) => (d.brightness.deviceControlled = v))"
         />
       </SettingRow>
 
-      <template v-if="cfg.brightness.autoDim">
-        <SettingRow :label="t('schedule.dimFrom')">
-          <input
-            type="time"
-            class="time"
-            :value="cfg.brightness.dimFrom"
-            @change="store.patch((d) => (d.brightness.dimFrom = ($event.target as HTMLInputElement).value))"
-          />
-        </SettingRow>
-
-        <SettingRow :label="t('schedule.dimLevel')">
+      <template v-if="!cfg.brightness.deviceControlled">
+        <SettingRow :label="t('schedule.brightness')">
           <div class="slider">
             <input
               type="range"
               min="5"
               max="100"
               step="5"
-              :value="cfg.brightness.dimLevel"
-              @change="store.patch((d) => (d.brightness.dimLevel = Number(($event.target as HTMLInputElement).value)))"
+              :value="cfg.brightness.level"
+              @change="store.patch((d) => (d.brightness.level = Number(($event.target as HTMLInputElement).value)))"
             />
-            <span class="value">{{ cfg.brightness.dimLevel }} %</span>
+            <span class="value">{{ cfg.brightness.level }} %</span>
           </div>
         </SettingRow>
+
+        <SettingRow :label="t('schedule.autoDim')">
+          <ToggleSwitch
+            :model-value="cfg.brightness.autoDim"
+            :label="t('schedule.autoDim')"
+            @update:model-value="(v) => store.patch((d) => (d.brightness.autoDim = v))"
+          />
+        </SettingRow>
+
+        <template v-if="cfg.brightness.autoDim">
+          <SettingRow :label="t('schedule.dimFrom')">
+            <input
+              type="time"
+              class="time"
+              :value="cfg.brightness.dimFrom"
+              @change="store.patch((d) => (d.brightness.dimFrom = ($event.target as HTMLInputElement).value))"
+            />
+          </SettingRow>
+
+          <SettingRow :label="t('schedule.dimLevel')">
+            <div class="slider">
+              <input
+                type="range"
+                min="5"
+                max="100"
+                step="5"
+                :value="cfg.brightness.dimLevel"
+                @change="store.patch((d) => (d.brightness.dimLevel = Number(($event.target as HTMLInputElement).value)))"
+              />
+              <span class="value">{{ cfg.brightness.dimLevel }} %</span>
+            </div>
+          </SettingRow>
+        </template>
       </template>
     </section>
   </div>

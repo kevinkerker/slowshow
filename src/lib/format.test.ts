@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  clockAngles,
   formatBytes,
   formatClock,
   formatDateLine,
@@ -19,6 +20,33 @@ describe('formatClock', () => {
     expect(formatClock(new Date(2025, 5, 15, 9, 5))).toBe('09:05')
     expect(formatClock(new Date(2025, 5, 15, 21, 47))).toBe('21:47')
     expect(formatClock(new Date(2025, 5, 15, 0, 0))).toBe('00:00')
+  })
+})
+
+describe('clockAngles', () => {
+  it('stellt die Zeiger auf zwoelf Uhr auf null Grad', () => {
+    expect(clockAngles(new Date(2026, 7, 30, 12, 0))).toEqual({ hour: 0, minute: 0 })
+    // Mitternacht ist derselbe Zeigerstand — die Uhr kennt nur zwoelf Stunden.
+    expect(clockAngles(new Date(2026, 7, 30, 0, 0))).toEqual({ hour: 0, minute: 0 })
+  })
+
+  it('dreht den Minutenzeiger mit 6 Grad je Minute', () => {
+    expect(clockAngles(new Date(2026, 7, 30, 3, 15)).minute).toBe(90)
+    expect(clockAngles(new Date(2026, 7, 30, 3, 30)).minute).toBe(180)
+    expect(clockAngles(new Date(2026, 7, 30, 3, 45)).minute).toBe(270)
+  })
+
+  it('laesst den Stundenzeiger mit der Minute mitwandern', () => {
+    // Halb vier: der Stundenzeiger steht zwischen drei und vier, nicht auf drei.
+    expect(clockAngles(new Date(2026, 7, 30, 3, 30)).hour).toBe(105)
+    // Kurz vor voll steht er fast schon auf der naechsten Stunde.
+    expect(clockAngles(new Date(2026, 7, 30, 11, 59)).hour).toBeCloseTo(359.5)
+  })
+
+  it('behandelt Nachmittagsstunden wie die Vormittagsstunden', () => {
+    const morgens = clockAngles(new Date(2026, 7, 30, 9, 20))
+    const abends = clockAngles(new Date(2026, 7, 30, 21, 20))
+    expect(abends).toEqual(morgens)
   })
 })
 

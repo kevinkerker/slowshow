@@ -24,6 +24,10 @@
   "night": {
     "restUntil": "Resting until {time}"
   },
+  "clock": {
+    "digital": "Digits",
+    "analog": "Hands"
+  },
   "sources": {
     "title": "Sources",
     "add": "Add source",
@@ -122,6 +126,7 @@
     "pairModeHint": "Two portrait photos side by side on the landscape display.",
     "overlays": "Overlays",
     "showClock": "Clock",
+    "clockStyle": "Clock face",
     "showDate": "Date",
     "showFileName": "File name",
     "showTakenAt": "Date taken",
@@ -145,7 +150,10 @@
     "overnightHint": "If the end is before the start, the period runs past midnight.",
     "nightClock": "Show clock at night",
     "nightClockHint": "Instead of a completely black screen.",
+    "nightClockStyle": "Night clock face",
     "brightness": "Brightness",
+    "deviceBrightness": "Let the device control brightness",
+    "deviceBrightnessHint": "The app hands over control and the system's automatic brightness applies. The screen still dims at night.",
     "autoDim": "Dim automatically in the evening",
     "dimFrom": "Dim from",
     "dimLevel": "Evening brightness",

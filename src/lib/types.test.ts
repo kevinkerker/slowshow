@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EVENTS, slideIds, type Slide } from './types'
+import { DEVICE_CONTROLLED_BRIGHTNESS, EVENTS, slideIds, type Slide } from './types'
 
 describe('slideIds', () => {
   it('liefert eine Id für ein Einzelbild', () => {
@@ -15,6 +15,20 @@ describe('slideIds', () => {
   it('liefert für nichts eine leere Liste', () => {
     // Der leere Zustand tritt vor dem ersten Sync auf und darf nicht werfen.
     expect(slideIds(null)).toEqual([])
+  })
+})
+
+describe('DEVICE_CONTROLLED_BRIGHTNESS', () => {
+  // Steht doppelt: hier und als `schedule::DEVICE_CONTROLLED` in Rust. Laufen
+  // die Werte auseinander, legt das Frontend bei gerätegesteuerter Helligkeit
+  // ein fast vollständig schwarzes Overlay über das Bild (E-22).
+  it('entspricht dem Sentinel aus schedule.rs', () => {
+    expect(DEVICE_CONTROLLED_BRIGHTNESS).toBe(0)
+  })
+
+  it('liegt ausserhalb des gueltigen Helligkeitsbereichs', () => {
+    // Nur deshalb kann der Wert nichts anderes bedeuten als "App regelt nicht".
+    expect(DEVICE_CONTROLLED_BRIGHTNESS).toBeLessThan(1)
   })
 })
 

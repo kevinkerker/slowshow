@@ -22,6 +22,8 @@ pub struct ConfigPatch {
     pub active_from: Option<String>,
     pub active_to: Option<String>,
     pub brightness: Option<u8>,
+    /// Regelung an das Gerät abgeben oder zurückholen (E-22).
+    pub device_brightness: Option<bool>,
 }
 
 /// Vollständiger Zustand — die eine Wahrheit für REST und MQTT.
@@ -38,6 +40,12 @@ pub fn status(app: &AppHandle) -> Value {
         "playing": state.is_playing(),
         "syncing": state.is_syncing(),
         "intervalSeconds": config.interval_seconds,
+        // Die *eingestellte* Grundhelligkeit, nicht die gerade wirksame aus
+        // `display`: Letztere ist nachts 1 und bei Gerätesteuerung 0 — beides
+        // liegt außerhalb des Bereichs, den der Regler in Home Assistant
+        // annimmt, und ein Regler soll ohnehin den Wert zeigen, den er stellt.
+        "brightness": config.brightness.level,
+        "deviceBrightness": config.brightness.device_controlled,
         "display": display,
         "currentSlide": state.current_slide(),
         "cache": stats,
@@ -59,6 +67,7 @@ pub fn config_summary(app: &AppHandle) -> Value {
         "activeFrom": c.schedule.active_from,
         "activeTo": c.schedule.active_to,
         "brightness": c.brightness.level,
+        "deviceBrightness": c.brightness.device_controlled,
     })
 }
 
@@ -81,13 +90,19 @@ pub fn set_screen(app: &AppHandle, on: bool) {
         DisplayState {
             slideshow_active: true,
             show_night_clock: false,
-            brightness: config.brightness.level,
+            brightness: crate::schedule::wake_brightness(&config.brightness),
         }
     } else {
         DisplayState {
             slideshow_active: false,
             show_night_clock: config.schedule.night_clock,
-            brightness: 1,
+            // Auch der Schlafbefehl greift nicht in eine Helligkeit ein, die
+            // der Nutzer dem Gerät übertragen hat (E-22). Der Schirm wird
+            // trotzdem schwarz — das erledigt die Oberfläche.
+            brightness: crate::schedule::app_brightness(
+                &config.brightness,
+                crate::schedule::NIGHT_BRIGHTNESS,
+            ),
         }
     };
 
@@ -128,6 +143,9 @@ pub fn patch_config(app: &AppHandle, patch: ConfigPatch) -> Result<Value, String
         }
         if let Some(v) = patch.brightness {
             c.brightness.level = v;
+        }
+        if let Some(v) = patch.device_brightness {
+            c.brightness.device_controlled = v;
         }
     })?;
 
@@ -185,5 +203,19 @@ mod tests {
         let p: ConfigPatch = serde_json::from_str("{}").unwrap();
         assert!(p.interval_seconds.is_none());
         assert!(p.brightness.is_none());
+        assert!(p.device_brightness.is_none());
+    }
+
+    #[test]
+    fn config_patch_nimmt_die_geraetesteuerung_entgegen_e_22() {
+        // Der Feldname ist der Vertrag mit REST (`POST /api/config`) und mit
+        // dem MQTT-Kommando `config`. Schreibt Rust `device_brightness` statt
+        // `deviceBrightness`, wird das Feld stumm ignoriert — serde meldet
+        // unbekannte Felder nicht.
+        let p: ConfigPatch = serde_json::from_str(r#"{"deviceBrightness": true}"#).unwrap();
+        assert_eq!(p.device_brightness, Some(true));
+
+        let p: ConfigPatch = serde_json::from_str(r#"{"deviceBrightness": false}"#).unwrap();
+        assert_eq!(p.device_brightness, Some(false));
     }
 }

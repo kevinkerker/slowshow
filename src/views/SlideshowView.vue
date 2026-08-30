@@ -15,6 +15,7 @@ import NightClock from '@/components/NightClock.vue'
 import { useConfigStore } from '@/stores/config'
 import { useSlideshowStore } from '@/stores/slideshow'
 import { createGestureRecognizer } from '@/composables/useGestures'
+import { usePixelShift } from '@/composables/usePixelShift'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -41,6 +42,25 @@ const currentSourceName = computed(() => {
 
 const isEmpty = computed(() => config.ready && !show.hasImages)
 
+/**
+ * Die Pause wird dauerhaft angezeigt, nicht nur beim Umschalten (E-21).
+ *
+ * Ein Rahmen, der stehenbleibt, sieht sonst aus wie einer, der hängt. Der
+ * kurze Hinweis war genau dann verschwunden, wenn jemand später davorstand und
+ * sich fragte, warum sich nichts mehr tut.
+ *
+ * Nicht im Nachtmodus: dort soll der Schirm dunkel bleiben (FA-54), und dass
+ * nichts weiterläuft, ist die erwartete Lage.
+ */
+const paused = computed(() => show.hasImages && !show.playing && active.value)
+
+/* Ein dauerhaftes Abzeichen ist genau das statische Overlay, gegen das NF-07
+ * gedacht ist — eine Pause kann Tage dauern. Es wandert deshalb wie Uhr und
+ * Bildunterschrift. */
+const { transform: pausedShift } = usePixelShift(
+  computed(() => cfg.value?.overlays.pixelShift ?? true),
+)
+
 // ── Gesten (FA-41, FA-43) ────────────────────────────────────────────────────
 
 /**
@@ -66,7 +86,8 @@ const gestures = createGestureRecognizer({
   onTapLeft: whenReady(() => void show.prev()),
   onTapCenter: whenReady(async () => {
     await show.togglePlaying()
-    flash(show.playing ? '' : t('slideshow.paused'))
+    // Kein kurzer Hinweis: den Zustand zeigt das Abzeichen, solange er gilt.
+    flash('')
   }),
 
   // Der lange Druck bleibt immer erreichbar — er ist der Weg in die
@@ -142,6 +163,7 @@ onBeforeUnmount(() => {
       <ClockOverlay
         :show-clock="cfg.overlays.showClock"
         :show-date="cfg.overlays.showDate"
+        :clock-style="cfg.overlays.clockStyle"
         :pixel-shift="cfg.overlays.pixelShift"
         :language="cfg.language"
       />
@@ -169,13 +191,27 @@ onBeforeUnmount(() => {
     <NightClock
       v-if="!active && nightClock && cfg"
       :resume-at="cfg.schedule.activeFrom"
+      :clock-style="cfg.schedule.nightClockStyle"
       :pixel-shift="cfg.overlays.pixelShift"
     />
 
-    <!-- Pausenhinweis und Rückmeldungen. -->
-    <Transition name="fade">
-      <div v-if="toast" class="toast">{{ toast }}</div>
-    </Transition>
+    <!-- Pausenzustand und kurze Rückmeldungen stehen übereinander, damit
+         sich beides nicht überdeckt, wenn während der Pause ein Bild
+         ausgeblendet wird. -->
+    <div class="top-stack">
+      <Transition name="fade">
+        <div v-if="paused" class="paused" :style="{ transform: pausedShift }" role="status">
+          <svg width="13" height="15" viewBox="0 0 12 14" aria-hidden="true">
+            <rect x="0" y="0" width="4" height="14" rx="1.4" fill="currentColor" />
+            <rect x="8" y="0" width="4" height="14" rx="1.4" fill="currentColor" />
+          </svg>
+          {{ t('slideshow.paused') }}
+        </div>
+      </Transition>
+      <Transition name="fade">
+        <div v-if="toast" class="toast">{{ toast }}</div>
+      </Transition>
+    </div>
 
     <!-- Schaltflächen oben rechts. Beide einzeln abschaltbar wie Uhr und
          Datum (FA-07), beide im Entwurf nicht vorgesehen — wer den Rahmen
@@ -283,11 +319,40 @@ onBeforeUnmount(() => {
   color: var(--ss-bg);
 }
 
-.toast {
+.top-stack {
   position: absolute;
   top: 32px;
   left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+  z-index: 20;
+}
+
+/* Messing statt Off-White: das Abzeichen meldet einen Zustand, keine Meldung.
+   Dieselbe Rolle hat die Farbe in der Zeitplan-Anzeige der Einstellungen. */
+.paused {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 20px;
+  background: rgba(10, 10, 10, 0.82);
+  border: 1px solid var(--ss-border-strong);
+  border-radius: var(--ss-radius-pill);
+  color: var(--ss-accent);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  /* Wie bei den übrigen Einblendungen: langsam genug, um nicht als Bewegung
+     wahrgenommen zu werden (NF-07). */
+  transition: transform 4s ease-in-out;
+}
+
+.toast {
   padding: 10px 22px;
   background: rgba(10, 10, 10, 0.82);
   border: 1px solid var(--ss-border-strong);
@@ -295,8 +360,6 @@ onBeforeUnmount(() => {
   color: var(--ss-text-body);
   font-size: 14px;
   letter-spacing: 0.04em;
-  pointer-events: none;
-  z-index: 20;
 }
 
 .corner-button {

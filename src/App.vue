@@ -10,6 +10,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useConfigStore } from '@/stores/config'
 import { keepAwake, releaseAwake } from '@/lib/wake'
+import { dimOpacity as computeDim } from '@/lib/dim'
 
 const store = useConfigStore()
 const loaded = ref(false)
@@ -19,18 +20,12 @@ const loaded = ref(false)
  *
  * Die echte Displayhelligkeit setzt der native Teil (MainActivity.kt); dieses
  * Overlay wirkt zusätzlich und funktioniert auch dort, wo das Setzen der
- * Helligkeit vom Hersteller-ROM ignoriert wird (R-04).
+ * Helligkeit vom Hersteller-ROM ignoriert wird (R-04). Seit E-22 trägt es die
+ * Nachtschwärzung allein, wenn die App die Beleuchtung nicht regeln darf.
+ *
+ * Die Fallunterscheidung liegt in `lib/dim.ts` — dort ist sie testbar.
  */
-const dimOpacity = computed(() => {
-  // Im Nachtmodus nicht abdunkeln: dort steht die gedimmte Uhr auf Schwarz
-  // (FA-54), und die ist bereits die abgedunkelte Darstellung. Ein zusätzliches
-  // 99-Prozent-Overlay darüber machte sie unsichtbar — der Nachtmodus wäre
-  // dann nicht von einem schwarzen Bildschirm zu unterscheiden.
-  if (store.display?.showNightClock) return 0
-
-  const level = store.display?.brightness ?? 100
-  return 1 - Math.max(1, Math.min(100, level)) / 100
-})
+const dimOpacity = computed(() => computeDim(store.display ?? null))
 
 onMounted(async () => {
   await store.load()

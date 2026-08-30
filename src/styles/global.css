@@ -39,9 +39,19 @@ body {
   overscroll-behavior: none;
   touch-action: manipulation;
 
-  /* Vollbild bis in die Display-Aussparungen (FA-01). */
-  padding: env(safe-area-inset-top) env(safe-area-inset-right)
-    env(safe-area-inset-bottom) env(safe-area-inset-left);
+  /* Bewusst keine `safe-area`-Polsterung (FA-01).
+   *
+   * Hier stand einmal `padding: env(safe-area-inset-*)` mit dem Kommentar
+   * „Vollbild bis in die Aussparungen" — die Polsterung bewirkt aber genau das
+   * Gegenteil: sie haelt den Inhalt von den Raendern fern. Auf dem Tablet
+   * meldet die WebView trotz Immersive-Modus weiterhin die Hoehe der
+   * Statusleiste als oberen Inset (60 px bei 400 dpi). Das Foto sass dadurch
+   * 60 px zu tief, und oben blieb ein schwarzer Streifen stehen.
+   *
+   * Der Rahmen soll bis an alle vier Kanten zeichnen. Wo Bedienelemente nicht
+   * unter eine Aussparung geraten duerfen, polstert die jeweilige Ansicht
+   * selbst — siehe `.settings` in `views/SettingsView.vue`. */
+  padding: 0;
 }
 
 /* Eingabefelder dürfen selbstverständlich ausgewählt werden. */
@@ -122,6 +132,30 @@ input::placeholder {
   color: var(--ss-text-faint);
   letter-spacing: 0.2em;
   text-transform: uppercase;
+}
+
+/* Segmentierte Auswahl fuer zwei bis drei gleichrangige Werte.
+ * Liegt global, weil sie in mehreren Bereichen der Einstellungen vorkommt
+ * (Bildanpassung FA-05, Uhrstil E-20) — dreimal dieselbe Regel scoped zu
+ * wiederholen, laesst die Varianten frueher oder spaeter auseinanderlaufen. */
+.ss-segmented {
+  display: flex;
+  border: 1px solid var(--ss-border-strong);
+  border-radius: var(--ss-radius-pill);
+  overflow: hidden;
+}
+
+.ss-segment {
+  padding: 0 20px;
+  min-height: 40px;
+  font-size: 14px;
+  color: var(--ss-text-muted);
+  transition: background var(--ss-transition), color var(--ss-transition);
+}
+
+.ss-segment.active {
+  background: var(--ss-surface-accent);
+  color: var(--ss-accent);
 }
 
 /* NF-11: Wer Bewegung reduziert haben möchte, bekommt keine Überblendungen

@@ -24,6 +24,10 @@
   "night": {
     "restUntil": "Ruhemodus bis {time}"
   },
+  "clock": {
+    "digital": "Ziffern",
+    "analog": "Zeiger"
+  },
   "sources": {
     "title": "Quellen",
     "add": "Quelle hinzufügen",
@@ -122,6 +126,7 @@
     "pairModeHint": "Zwei Hochformatfotos nebeneinander auf dem Querformat-Display.",
     "overlays": "Einblendungen",
     "showClock": "Uhrzeit",
+    "clockStyle": "Darstellung der Uhr",
     "showDate": "Datum",
     "showFileName": "Dateiname",
     "showTakenAt": "Aufnahmedatum",
@@ -145,7 +150,10 @@
     "overnightHint": "Endet die Zeit vor dem Beginn, läuft sie über Mitternacht.",
     "nightClock": "Nachts Uhr anzeigen",
     "nightClockHint": "Statt eines komplett schwarzen Bildschirms.",
+    "nightClockStyle": "Darstellung der Nachtuhr",
     "brightness": "Helligkeit",
+    "deviceBrightness": "Helligkeit vom Gerät regeln lassen",
+    "deviceBrightnessHint": "Die App gibt die Steuerung ab; es gilt die Helligkeitsautomatik des Systems. Nachts wird trotzdem abgedunkelt.",
     "autoDim": "Abends automatisch abdunkeln",
     "dimFrom": "Abdunkeln ab",
     "dimLevel": "Helligkeit abends",

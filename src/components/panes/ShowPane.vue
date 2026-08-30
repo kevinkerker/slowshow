@@ -10,7 +10,7 @@ import ToggleSwitch from '../ToggleSwitch.vue'
 import * as api from '@/lib/api'
 import { useConfigStore } from '@/stores/config'
 import { formatInterval } from '@/lib/format'
-import type { CacheEntry, FitMode, PlayOrder } from '@/lib/types'
+import type { CacheEntry, ClockStyle, FitMode, PlayOrder } from '@/lib/types'
 
 const { t } = useI18n()
 const store = useConfigStore()
@@ -28,6 +28,7 @@ const INTERVALS = [5, 10, 15, 30, 60, 120, 300, 600, 1800]
 
 const ORDERS: PlayOrder[] = ['random', 'fileName', 'takenAt', 'modified']
 const FIT_MODES: FitMode[] = ['contain', 'cover']
+const CLOCK_STYLES: ClockStyle[] = ['digital', 'analog']
 
 function orderLabel(order: PlayOrder): string {
   return t(
@@ -79,11 +80,11 @@ onMounted(loadExcluded)
         :label="t('show.fitMode')"
         :hint="cfg.fitMode === 'contain' ? t('show.fitContainHint') : t('show.fitCoverHint')"
       >
-        <div class="segmented">
+        <div class="ss-segmented">
           <button
             v-for="mode in FIT_MODES"
             :key="mode"
-            class="segment"
+            class="ss-segment"
             :class="{ active: cfg.fitMode === mode }"
             @click="store.patch((d) => (d.fitMode = mode))"
           >
@@ -144,6 +145,20 @@ onMounted(loadExcluded)
           :label="t('show.showClock')"
           @update:model-value="(v) => store.patch((d) => (d.overlays.showClock = v))"
         />
+      </SettingRow>
+
+      <SettingRow v-if="cfg.overlays.showClock" :label="t('show.clockStyle')">
+        <div class="ss-segmented">
+          <button
+            v-for="style in CLOCK_STYLES"
+            :key="style"
+            class="ss-segment"
+            :class="{ active: cfg.overlays.clockStyle === style }"
+            @click="store.patch((d) => (d.overlays.clockStyle = style))"
+          >
+            {{ t(`clock.${style}`) }}
+          </button>
+        </div>
       </SettingRow>
 
       <SettingRow :label="t('show.showDate')">
@@ -230,26 +245,6 @@ section > .ss-label {
 
 .wide {
   width: 200px;
-}
-
-.segmented {
-  display: flex;
-  border: 1px solid var(--ss-border-strong);
-  border-radius: var(--ss-radius-pill);
-  overflow: hidden;
-}
-
-.segment {
-  padding: 0 20px;
-  min-height: 40px;
-  font-size: 14px;
-  color: var(--ss-text-muted);
-  transition: background var(--ss-transition), color var(--ss-transition);
-}
-
-.segment.active {
-  background: var(--ss-surface-accent);
-  color: var(--ss-accent);
 }
 
 .slider {
