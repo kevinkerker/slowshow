@@ -12,6 +12,7 @@ import * as api from '@/lib/api'
 import { useConfigStore } from '@/stores/config'
 import { formatBytes } from '@/lib/format'
 import { currentDevice } from '@/lib/device'
+import { backupFileName, isAvailable, openTextFile, saveTextFile } from '@/lib/saf'
 import { localeTag, type Language } from '@/lib/i18n'
 import { EVENTS, type DatabaseCheck, type MqttStatus, type StorageBreakdown } from '@/lib/types'
 
@@ -80,13 +81,6 @@ function flash(message: string) {
   setTimeout(() => (notice.value = null), 5000)
 }
 
-/**
- * Konfiguration exportieren (FA-45).
- *
- * Bewusst über die Zwischenablage statt über einen Datei-Dialog: der
- * Sandkasten des Anzeigefensters unterbindet Downloads, und auf einem Tablet
- * ohne Tastatur ist die Zwischenablage der kürzere Weg.
- */
 // ── Speicher, Datenbank, Diagnose (Wartung F9–F11, E-31) ────────────────────
 // Nach E-31 kein eigener Navigationsbereich: was den Speicher und die Ablage
 // betrifft, steht bei System.
@@ -171,19 +165,51 @@ async function copyReport() {
   }
 }
 
+/**
+ * Sicherung in eine Datei schreiben (FA-45).
+ *
+ * Frueher lief das ueber die Zwischenablage. Das war nur halb benutzbar: der
+ * Export gelang, der Import scheiterte immer an "Read permission denied" —
+ * Androids WebView kann `clipboard-read` nicht gewaehren. Eine Sicherung, die
+ * man nie zurueckspielen kann, sieht funktionierend aus und ist keine.
+ *
+ * Ausserdem ueberlebt eine Datei, was die Zwischenablage nicht ueberlebt:
+ * Neustart, Werksreset, Geraetewechsel. Genau dafuer macht man eine Sicherung.
+ *
+ * Auf dem Schreibtisch (Nebenprodukt, Lastenheft 1.3) gibt es keinen
+ * SAF-Dialog; dort bleibt die Zwischenablage, weil sie da vollstaendig
+ * funktioniert.
+ */
 async function exportConfig() {
   try {
     const json = await api.exportConfig()
+
+    if (await isAvailable()) {
+      const name = await saveTextFile(backupFileName(), json)
+      if (name) flash(t('system.exportedFile', { name }))
+      return
+    }
+
     await navigator.clipboard.writeText(json)
     flash(t('system.exported'))
   } catch (e) {
-    flash(t('system.importFailed', { error: e instanceof Error ? e.message : String(e) }))
+    flash(t('system.exportFailed', { error: e instanceof Error ? e.message : String(e) }))
   }
 }
 
+/** Sicherung aus einer Datei einlesen (FA-45). Gegenstueck zu `exportConfig`. */
 async function importConfig() {
   try {
-    const json = await navigator.clipboard.readText()
+    let json: string | null = null
+
+    if (await isAvailable()) {
+      const picked = await openTextFile()
+      if (!picked) return
+      json = picked.content
+    } else {
+      json = await navigator.clipboard.readText()
+    }
+
     await api.importConfig(json)
     await store.refreshStats()
     flash(t('system.imported'))
@@ -191,6 +217,7 @@ async function importConfig() {
     flash(t('system.importFailed', { error: e instanceof Error ? e.message : String(e) }))
   }
 }
+
 </script>
 
 <template>

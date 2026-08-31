@@ -31,6 +31,8 @@ import {
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { SIGN_MARKER, keystoreIssue, withSigningConfig } from './lib/android-signing.mjs'
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const srcDir = resolve(root, 'src-tauri/android-src')
 const genDir = resolve(root, 'src-tauri/gen/android')
@@ -254,7 +256,54 @@ if (existsSync(iconSrc)) {
   console.warn('src-tauri/icons/android/ fehlt — einmalig `npm run icons` ausfuehren')
 }
 
-// ── 4. Kontrolle ─────────────────────────────────────────────────────────────
+// ── 4. Signaturschlüssel ─────────────────────────────────────────────────
+//
+// Tauri legt in `build.gradle.kts` **keine** `signingConfig` an. Ohne diesen
+// Abschnitt liest niemand `keystore.properties`, und der Release-Bau endet als
+// `app-universal-release-unsigned.apk` — ohne Fehlermeldung: Gradle meldet
+// Erfolg, die Datei lässt sich nur weder installieren noch hochladen (RB-03).
+// Genau so ist der erste signierte Bau hier ausgegangen.
+//
+// Der Eingriff gehört hierher und nicht in die generierte Datei: `gen/` ist
+// gitignored, ein dort von Hand eingefügter Block wäre beim nächsten
+// `tauri android init` weg — und weil das Verzeichnis ignoriert ist, ohne dass
+// es jemand bemerkt.
+
+const gradlePath = resolve(genDir, 'app/build.gradle.kts')
+if (!existsSync(gradlePath)) {
+  console.error('app/build.gradle.kts fehlt — ist `tauri android init` durchgelaufen?')
+  process.exit(1)
+}
+
+let result
+try {
+  result = withSigningConfig(readFileSync(gradlePath, 'utf8'))
+} catch (error) {
+  console.error(`  ${error.message}`)
+  process.exit(1)
+}
+
+if (result.changed) {
+  writeFileSync(gradlePath, result.gradle, 'utf8')
+  console.log('build.gradle.kts um signingConfig ergänzt')
+} else {
+  console.log(`Signaturkonfiguration steht bereits in build.gradle.kts (${SIGN_MARKER})`)
+}
+
+const keystorePath = resolve(genDir, 'app/keystore.properties')
+const issue = keystoreIssue(
+  existsSync(keystorePath) ? readFileSync(keystorePath, 'utf8') : null,
+  existsSync,
+)
+if (issue) {
+  console.warn(`  ${issue}`)
+  console.warn('  Release-Builds bleiben unsigniert. Vorlage:')
+  console.warn('  docs/keystore.properties.example — Anleitung: docs/signing.md')
+} else {
+  console.log('Signaturschlüssel gefunden — Release-Builds werden signiert')
+}
+
+// ── 5. Kontrolle ─────────────────────────────────────────────────────────────
 
 const checks = [
   ['android.permission.INTERNET', 'Netzzugriff für FA-21/FA-23'],

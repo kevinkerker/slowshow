@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { uriFromString, uriToString } from './saf'
+import { backupFileName, uriFromString, uriToString } from './saf'
 
 /**
  * Die Unterordner-Filter (FA-29) werden hier nicht mehr geprüft: seit der
@@ -34,5 +34,25 @@ describe('SAF-URI Serialisierung', () => {
   it('meldet unlesbare Werte statt zu werfen', () => {
     expect(uriFromString('')).toBeNull()
     expect(uriFromString('kein json')).toBeNull()
+  })
+})
+
+describe('backupFileName', () => {
+  it('nennt die Datei nach dem Tag, in ISO-Reihenfolge', () => {
+    // ISO und nicht die deutsche Schreibweise: nur so sortiert eine Liste
+    // mehrerer Sicherungen von selbst chronologisch. `31.08.2026` taete das
+    // nicht, und genau daneben liegt die Sicherung, die man sucht.
+    expect(backupFileName(new Date(2026, 7, 31))).toBe('slowshow-sicherung-2026-08-31.json')
+  })
+
+  it('fuellt Monat und Tag auf zwei Stellen auf', () => {
+    // Ohne Auffuellen wuerde `2026-1-5` neben `2026-10-05` einsortiert.
+    expect(backupFileName(new Date(2026, 0, 5))).toBe('slowshow-sicherung-2026-01-05.json')
+  })
+
+  it('endet auf .json', () => {
+    // Der Speicherdialog uebernimmt den Vorschlag; ohne Endung findet der
+    // Oeffnen-Dialog die Datei spaeter nicht ueber den MIME-Filter.
+    expect(backupFileName()).toMatch(/\.json$/)
   })
 })

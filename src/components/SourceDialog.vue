@@ -481,7 +481,16 @@ function message(e: unknown): string {
         <!-- Postfach (E-30). Ein Postfach je Rahmen: die Quellenliste laesst
              kein zweites zu, weil das Papier genau eines vorsieht. -->
         <template v-if="kind === 'mail'">
-          <SettingRow :label="t('sourceForm.mailHost')" stacked>
+          <!-- E-39: Die beiden Hinweise stehen dort, wo die Entscheidung
+               faellt — nicht in einer Anleitung, die niemand aufschlaegt. Sie
+               wirken an der Stelle, die bei einem Postfach wirklich zaehlt:
+               nicht wo der Schluessel liegt, sondern was ein gestohlenes
+               Passwort oeffnet. -->
+          <SettingRow
+            :label="t('sourceForm.mailHost')"
+            :hint="t('sourceForm.mailAccountHint')"
+            stacked
+          >
             <input
               v-model="mailHost"
               type="text"
@@ -510,7 +519,7 @@ function message(e: unknown): string {
 
           <SettingRow
             :label="t('sourceForm.password')"
-            :hint="isEdit ? t('sourceForm.passwordKeep') : undefined"
+            :hint="isEdit ? t('sourceForm.passwordKeep') : t('sourceForm.mailPasswordHint')"
             stacked
           >
             <input v-model="password" type="password" autocomplete="current-password" />

@@ -452,4 +452,35 @@ describe('SourceDialog — Felder je Quellenart', () => {
     expect(ab).toHaveBeenCalled()
     vi.unstubAllGlobals()
   })
+
+  // ── Hinweise zur Absicherung (E-39) ───────────────────────────────────────
+
+  it('empfiehlt beim Anlegen ein App-Passwort und ein eigenes Postfach', async () => {
+    // Der Keystore schuetzt den Schluessel; diese beiden Saetze begrenzen,
+    // was ein gestohlenes Passwort ueberhaupt oeffnet. Sie stehen im
+    // Formular, nicht in einer Anleitung, die niemand aufschlaegt.
+    const w = mount(SourceDialog, {
+      props: { source: null },
+      global: { plugins: [i18n] },
+    })
+    // Auf „Postfach" umschalten: die Hinweise haengen an dessen Feldern.
+    // Es sind echte Radiofelder; `setValue` schaltet sie um.
+    const arten = w.findAll('.kinds input[type="radio"]')
+    expect(arten.length, 'Auswahl der Quellenart nicht gefunden').toBe(4)
+    await arten[3].setValue()
+    await w.vm.$nextTick()
+
+    const text = w.text()
+    expect(text).toContain('App-Passwort')
+    expect(text).toContain('eigenes Postfach')
+  })
+
+  it('zeigt beim Bearbeiten den Hinweis zum Beibehalten statt der Empfehlung', async () => {
+    // Dort ist „leer lassen behaelt das gespeicherte" die dringendere
+    // Auskunft — die Empfehlung kommt beim Anlegen zur richtigen Zeit.
+    const w = form('mail')
+    await w.vm.$nextTick()
+    expect(w.text()).toContain('Leer lassen')
+    expect(w.text()).not.toContain('App-Passwort')
+  })
 })
