@@ -169,7 +169,7 @@ Letztere sind personenbezogene Daten Dritter — der Menschen, die dem Nutzer
 schreiben.
 
 Maßgeblich ist der Abschnitt „Angaben für das Data-Safety-Formular“ in
-[privacy-policy.md](privacy-policy.md); diese Tabelle ist die Kurzfassung.
+[privacy-policy.md](../docs/privacy-policy.md); diese Tabelle ist die Kurzfassung.
 Verantwortlich für die Angaben im Formular ist, wer die App einreicht.
 
 Die Datenschutzerklärung muss vor der Veröffentlichung unter einer

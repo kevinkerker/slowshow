@@ -394,7 +394,7 @@ räumt `deploy-android.ps1` das alte APK vor dem Bauen weg.
 | Vordergrunddienst | NF-01, teilweise NF-02 | umgesetzt (E-24) — Grenzen siehe dort | `android-src/SlowshowService.kt` |
 | Hochformat-Montage | RB-02, FA-08 | umgesetzt (E-26), Entwurf offen | `orientation.rs`, `playlist.rs`, `SlideStage.vue` |
 | CI-Build | Maßnahme zu R-11 und R-13 | umgesetzt | `.github/workflows/ci.yml` |
-| Play-Store-Unterlagen | 5.1, RB-03 | vorbereitet | `docs/store-listing.md`, `docs/privacy-policy.md` |
+| Play-Store-Unterlagen | 5.1, RB-03 | vorbereitet | `notes/store-listing.md`, `docs/privacy-policy.md` |
 | Drittlizenz-Übersicht | 5.1, RB-05 | umgesetzt – Befund zu RB-05 in 10.1 | `docs/third-party-licenses.md`, erzeugt von `scripts/third-party-licenses.mjs` |
 
 **Noch nicht begonnen:** Dauertest über 7 Tage (5.2), Speichertest mit 5 000 Bildern (5.2), Neustart-Test auf echter Hardware. Mit E-10 sind alle drei jetzt durchführbar — das Referenzgerät steht fest und die App läuft darauf.

@@ -103,7 +103,7 @@ Write-Host ("Gebaut: {0} ({1:N1} MB)" -f $apk.Name, ($apk.Length / 1MB))
 if ($apk.Name -like "*unsigned*") {
     Write-Warning "Dieses APK ist nicht signiert und laesst sich nicht installieren."
     Write-Warning "Zum Testen: .\deploy-android.ps1 -dev"
-    Write-Warning "Fuer Release-Builds einen Schluessel einrichten - siehe docs/signing.md"
+    Write-Warning "Fuer Release-Builds einen Schluessel einrichten - siehe notes/signing.md"
     exit 1
 }
 

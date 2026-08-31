@@ -127,7 +127,7 @@ Installiert wird zwar nur der gültige Teil, übertragen aber die ganze Datei.
 
 Ein Release-Build braucht einen Signaturschlüssel — ohne ihn heißt das Ergebnis
 `…-release-unsigned.apk` und lässt sich nicht installieren. Einrichtung in
-[docs/signing.md](docs/signing.md). Zum Ausprobieren genügt der Debug-Build.
+[notes/signing.md](notes/signing.md). Zum Ausprobieren genügt der Debug-Build.
 
 ### Auf einem Smartphone testen
 

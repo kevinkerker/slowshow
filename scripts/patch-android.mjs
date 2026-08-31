@@ -298,7 +298,7 @@ const issue = keystoreIssue(
 if (issue) {
   console.warn(`  ${issue}`)
   console.warn('  Release-Builds bleiben unsigniert. Vorlage:')
-  console.warn('  docs/keystore.properties.example — Anleitung: docs/signing.md')
+  console.warn('  notes/keystore.properties.example — Anleitung: notes/signing.md')
 } else {
   console.log('Signaturschlüssel gefunden — Release-Builds werden signiert')
 }
