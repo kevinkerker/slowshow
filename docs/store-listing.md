@@ -23,10 +23,10 @@ abarbeiten.
 ## Kurzbeschreibung (max. 80 Zeichen)
 
 ```text
-Ihr Tablet als digitaler Bilderrahmen. Fotos vom NAS, aus der Cloud, vom Gerät.
+Digitaler Bilderrahmen: Fotos vom NAS, aus der Cloud oder per E-Mail.
 ```
 
-(78 Zeichen)
+(69 Zeichen)
 
 ---
 
@@ -46,9 +46,23 @@ BILDQUELLEN
 • Lokale Ordner auf Tablet und SD-Karte
 • NAS über WebDAV — Synology, QNAP, ownCloud und andere
 • Nextcloud-Alben, mit serverseitigen Vorschaubildern
+• Ein eigenes Postfach: Wer Ihnen ein Foto schickt, sieht es am Rahmen
 
 Mehrere Quellen lassen sich gleichzeitig nutzen und einzeln ein- und
 ausschalten.
+
+
+FOTOS PER E-MAIL
+
+Richten Sie ein Postfach ein, holt Slowshow die Bilder aus eingehenden
+Nachrichten — ohne dass jemand eine App braucht. Großeltern bekommen so neue
+Fotos, indem die Kinder sie einfach per Mail schicken.
+
+• Fotos unbekannter Absender warten auf Ihre Freigabe am Rahmen
+• Freigegebene Absender landen ohne Nachfrage in der Diashow
+• Verarbeitete Nachrichten werden als gelesen markiert
+• Empfohlen: ein eigenes Postfach und ein App-Passwort statt des
+  Kontopassworts — die App weist im Formular darauf hin
 
 
 FÜR DEN DAUERBETRIEB GEBAUT
@@ -86,49 +100,44 @@ WAS SLOWSHOW NICHT KANN
 
 • Keine HEIC-Fotos aus lokalen Ordnern oder vom NAS. Über Nextcloud
   funktionieren sie, weil der Server sie umwandelt.
-• Keine Videos.
+• Keine Videos. Bewegte Bilder von iPhone und Pixel werden als Standbild
+  gezeigt — das Foto darin liest Slowshow, den Film nicht.
+• Von animierten GIFs wird das erste Einzelbild gezeigt.
 • Kein Start nach einem Neustart des Tablets — die App muss dann von Hand
   geöffnet werden.
+
+Gelesen werden JPEG, PNG, WebP, BMP, TIFF, ICO und GIF.
 ```
 
 ---
 
-## Begründungen für die Prüfung
+## Berechtigungen
 
-Google verlangt für einzelne Berechtigungen eine Erklärung. Vorformuliert:
+Slowshow fordert genau zwei Rechte an:
 
-### `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`
+| Berechtigung | Grund |
+| --- | --- |
+| `INTERNET` | Fotos von NAS, Nextcloud oder Postfach laden; Steuerung im Heimnetz |
+| `ACCESS_NETWORK_STATE` | Erkennen, ob eine Verbindung besteht |
 
-```text
-Slowshow ist ein digitaler Bilderrahmen, der auf einem fest installierten,
-dauerhaft mit Strom versorgten Tablet läuft. Die Kernfunktion ist die
-ununterbrochene Anzeige über Stunden und Tage hinweg.
+**Für keines davon verlangt Google eine gesonderte Erklärung.** Das ist das
+Ergebnis von E-38: Hier standen früher ausformulierte Begründungen für
+`FOREGROUND_SERVICE_SPECIAL_USE` und `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`.
+Beide Rechte sind entfallen, weil der Vordergrunddienst entfallen ist.
 
-Die Batterieoptimierung vieler Hersteller beendet oder drosselt langlaufende
-Apps und würde die Diashow unbemerkt anhalten. Die App fragt die Ausnahme
-einmalig an; sie ist nicht erzwungen, und die Nutzung ohne Ausnahme bleibt
-möglich.
-```
+`specialUse` löst eine gesonderte Prüfung durch Google aus, mit ungewissem
+Ausgang und ungewisser Dauer. Wer die alten Texte aus Versehen doch einreicht,
+holt sich diese Prüfung zurück — für eine Funktion, die die App nicht mehr hat.
+Deshalb stehen sie hier nicht mehr, auch nicht als Rest.
 
-### `FOREGROUND_SERVICE_SPECIAL_USE`
+Zwei weitere Rechte tauchen in der Installationsübersicht auf, ohne dass
+Slowshow sie anfordert: `ACCESS_LOCAL_NETWORK` aus der Android-WebView und
+`DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` aus AndroidX. Beide kommen aus
+Bibliotheken und werden von der App nicht verwendet.
 
-Der Dienst-Typ `specialUse` verlangt eine gesonderte Erklärung im
-Play-Console-Formular. Sie muss zu der `<property>` im Manifest passen (E-24):
-
-```text
-Slowshow ist ein digitaler Bilderrahmen. Die Kernfunktion ist eine Diashow, die
-über Tage hinweg ohne Nutzerinteraktion weiterläuft, auf einem fest
-installierten und dauerhaft mit Strom versorgten Tablet.
-
-Ohne Vordergrunddienst stuft Android die App bei Speicherdruck als entbehrlich
-ein und beendet sie; der Bildschirm bleibt dann schwarz, bis jemand die App von
-Hand neu startet. Keiner der vordefinierten Dienst-Typen trifft zu: Slowshow
-gibt keine Medien wieder, ortet nicht, misst nichts und synchronisiert nicht im
-Hintergrund als Selbstzweck — die Bildanzeige selbst ist der Zweck.
-
-Der Dienst hält keine Wakelocks über die Anzeige hinaus und startet keine
-Netzwerkaktivität von sich aus.
-```
+Was der Wegfall kostet, steht in E-38: Android kann die App bei Speicherdruck
+beenden, und sie startet nicht von selbst neu. Das gehört in die Beschreibung
+(siehe „Was Slowshow nicht kann“), nicht in eine Rechtfertigung.
 
 ### Zugriff auf lokale Dateien
 
@@ -145,13 +154,26 @@ die Mediathek findet nicht statt.
 
 | Frage | Antwort |
 | --- | --- |
-| Werden Daten erhoben? | Nein |
+| Werden Daten erhoben? | Nein — nichts fließt zum Entwickler oder zu Dritten |
 | Werden Daten geteilt? | Nein |
-| Verschlüsselung bei der Übertragung? | Ja, sofern der vom Nutzer eingetragene Server HTTPS anbietet |
-| Können Nutzer Löschung beantragen? | Entfällt — es werden keine Daten übermittelt |
+| Verschlüsselung bei der Übertragung? | IMAP immer über TLS; NAS und Nextcloud verschlüsselt, sofern der vom Nutzer eingetragene Server HTTPS anbietet |
+| Können Nutzer Löschung beantragen? | Entfällt — alle Daten liegen auf dem Gerät und verschwinden mit der Deinstallation |
 
-Datenschutzerklärung: [privacy-policy.md](privacy-policy.md), vor der
-Veröffentlichung unter einer öffentlichen Adresse ablegen.
+Google zählt als „Erhebung“, dass Daten das Gerät verlassen. Zugangsdaten
+gehen ausschließlich an die Server, die der Nutzer selbst einträgt.
+
+**Auf dem Gerät gespeichert** — im Formular nicht als Erhebung zu melden, aber
+zu kennen: Zugangsdaten (AES-256-GCM verschlüsselt), verkleinerte Kopien der
+Fotos sowie **Absenderadressen und Betreffzeilen** empfangener Nachrichten.
+Letztere sind personenbezogene Daten Dritter — der Menschen, die dem Nutzer
+schreiben.
+
+Maßgeblich ist der Abschnitt „Angaben für das Data-Safety-Formular“ in
+[privacy-policy.md](privacy-policy.md); diese Tabelle ist die Kurzfassung.
+Verantwortlich für die Angaben im Formular ist, wer die App einreicht.
+
+Die Datenschutzerklärung muss vor der Veröffentlichung unter einer
+öffentlich erreichbaren Adresse liegen — Play verlangt eine URL, keine Datei.
 
 ---
 
@@ -174,10 +196,72 @@ Empfohlene Screenshots:
 
 ## Vor der Veröffentlichung zu klären
 
-- [ ] Referenzgerät festlegen (E-10) — ohne echte Screenshots kein Store-Eintrag
+- [x] Referenzgerät festgelegt (E-10): Xiaomi Pad 6, Android 15 (MIUI)
+- [x] Signaturschlüssel erzeugt und außerhalb des Repositories gesichert —
+      siehe [signing.md](signing.md). `keystore.properties` liegt unter
+      `src-tauri/gen/` und ist gitignored; die Vorlage überlebt in
+      [keystore.properties.example](keystore.properties.example).
+- [x] Signiertes AAB gebaut und gegengeprüft (`jarsigner -verify`)
+- [x] Target-API-Level: `targetSdk = 36` — gegen die dann gültige Vorgabe
+      erneut prüfen, wenn die Einreichung ansteht (R-13)
 - [ ] Datenschutzerklärung öffentlich erreichbar machen (GitHub Pages)
-- [ ] Signaturschlüssel erzeugen und **außerhalb des Repositories** sichern
 - [ ] Play-Console-Konto anlegen (einmalige Gebühr, RB-04 erlaubt das)
-- [ ] Target-API-Level gegen die dann gültige Vorgabe prüfen (R-13)
-- [ ] Feature-Grafik erstellen
+- [ ] Screenshots vom Referenzgerät erstellen
+- [ ] Feature-Grafik erstellen (1024 × 500)
 - [ ] Interner Test mit dem Referenzgerät vor der offenen Veröffentlichung
+
+## Interner Test
+
+Beschlossen: **zuerst interner Test, dann offene Veröffentlichung.** Grund
+steht unter „Nicht geprüft“ — der Dauerbetrieb ist die Kernzusage der App und
+nie gemessen worden.
+
+**Was hochgeladen wird**
+
+`src-tauri/gen/android/app/build/outputs/bundle/universalRelease/app-universal-release.aab`
+
+Neu bauen mit `npx tauri android build` (ohne `--apk`). Vorher prüfen, dass
+`scripts/patch-android.mjs` „Signaturschlüssel gefunden“ meldet — sonst ist das
+Bundle unsigniert, und das fällt sonst erst beim Hochladen auf.
+
+**Weg in der Play Console**
+
+1. Testen → Interner Test → Neuen Release erstellen
+2. AAB hochladen
+3. Tester über eine E-Mail-Liste hinzufügen
+4. Opt-in-Link an die Tester geben
+
+**Was Play vorher verlangt**
+
+Der Abschnitt „App-Inhalte“ muss ausgefüllt sein, bevor sich überhaupt ein
+Release anlegen lässt: Datenschutzerklärung (als **URL**, nicht als Datei),
+Data Safety, Inhaltsfreigabe, Zielgruppe, Werbung. Die Vorlagen dafür stehen
+weiter oben in dieser Datei.
+
+Wie viel von der Store-Präsenz (Grafiken, Screenshots) schon für den internen
+Test verlangt wird, unterscheidet sich je nach Kontostand und ändert sich
+gelegentlich — die Console führt eine eigene Aufgabenliste, die maßgeblich ist.
+
+**Vor der Produktion beachten**
+
+Google verlangt von **neuen persönlichen Entwicklerkonten** vor dem Zugang zur
+Produktion einen **geschlossenen** Test mit einer Mindestzahl an Testern über
+einen zusammenhängenden Zeitraum. Ein *interner* Test erfüllt das nicht. Die
+genauen Zahlen und die Frage, ob es für dieses Konto gilt, zeigt die Console —
+das ist vor der Planung zu klären, weil es Wochen kostet, nicht Stunden.
+
+---
+
+## Nicht geprüft
+
+Drei Zusagen des Lastenhefts sind nie gemessen worden. Sie stehen hier, damit
+niemand sie für geprüft hält:
+
+- **Dauerbetrieb über sieben Tage.** Ohne Vordergrunddienst (E-38) kann Android
+  die App bei Speicherdruck beenden. Wie oft das geschieht, weiß niemand.
+- **Bestand mit 5000 Fotos.** Getestet wurde mit 597.
+- **Verhalten nach einem Neustart des Geräts.** Die Beschreibung sagt zu, dass
+  die App dann von Hand gestartet werden muss — gemessen ist auch das nicht.
+
+Die ersten beiden sprechen dafür, mit einem **internen Test** zu beginnen und
+nicht mit der offenen Veröffentlichung.
