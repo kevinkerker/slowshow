@@ -25,6 +25,8 @@ pub mod events {
     pub const SLIDE: &str = "slowshow://slide";
     /// Ein Sync-Lauf ist fertig.
     pub const SYNC: &str = "slowshow://sync";
+    /// Fortschritt eines Postfach-Neuabgleichs (Wartung F8).
+    pub const RESYNC: &str = "slowshow://resync";
     /// Zwischenstand eines laufenden Syncs.
     pub const SYNC_PROGRESS: &str = "slowshow://sync-progress";
     /// Zeitplan/Helligkeit haben sich geändert (FA-52–54).
@@ -43,10 +45,28 @@ pub struct AppState {
     config_store: ConfigStore,
     /// Ablageort des Durchlaufs (E-29).
     playback_path: PathBuf,
+    /// Protokoll der Postfach-Abrufe (Wartung F6).
+    ///
+    /// Eigene Datei wie der Durchlauf: es beschreibt, *was geschehen ist*,
+    /// nicht *was da ist* — ein neu aufgebauter Cache soll die Vorgeschichte
+    /// nicht mitreissen, gerade dann will man sie lesen.
+    pub fetch_log: Mutex<crate::mail::log::FetchLog>,
+    fetch_log_path: PathBuf,
+    /// Bereits verarbeitete Nachrichten ohne Foto (E-36).
+    ///
+    /// Der Cache-Index kennt nur Bilder; eine Mail ohne brauchbaren Anhang
+    /// waere sonst bei jedem Lauf wieder unbekannt und wuerde erneut geholt.
+    pub seen_mails: Mutex<crate::mail::seen::SeenMails>,
+    seen_mails_path: PathBuf,
     /// Läuft die Diashow? Pause über Tippen (FA-41) oder Fernsteuerung (FA-55).
     playing: AtomicBool,
     /// Verhindert überlappende Sync-Läufe.
     syncing: AtomicBool,
+    /// Abbruchwunsch für den laufenden Neuabgleich (Wartung F8).
+    ///
+    /// Ein Neuabgleich über ein volles Postfach läuft Minuten. Ohne Abbruch
+    /// bliebe nur, die App zu beenden — und der Rahmen hängt an der Wand.
+    pub resync_cancel: AtomicBool,
     /// Urne der intelligenten Mischung (E-29).
     ///
     /// Neben der Playlist und nicht in ihr: die uebrigen Modi sind eine
@@ -85,6 +105,8 @@ impl AppState {
         // Vor dem Verschieben in den Mutex ablesen.
         let starts_portrait = config.orientation == Orientation::Portrait;
         let playback_path = data_dir.join("playback.json");
+        let fetch_log_path = data_dir.join("fetchlog.json");
+        let seen_mails_path = data_dir.join("seenmails.json");
 
         let state = Self {
             config: Mutex::new(config),
@@ -95,9 +117,14 @@ impl AppState {
             playing: AtomicBool::new(true),
             scheduler: Mutex::new(load_scheduler(&playback_path)),
             playback_path,
+            fetch_log: Mutex::new(load_fetch_log(&fetch_log_path)),
+            fetch_log_path,
+            seen_mails: Mutex::new(load_seen_mails(&seen_mails_path)),
+            seen_mails_path,
             smart_slide: Mutex::new(None),
             frame_portrait: AtomicBool::new(starts_portrait),
             syncing: AtomicBool::new(false),
+            resync_cancel: AtomicBool::new(false),
         };
         state.rebuild_playlist();
         Ok(state)
@@ -206,6 +233,8 @@ impl AppState {
                 &enabled,
                 config.order,
                 config.playback.newest_first,
+                &config.filter,
+                now_ts(),
                 seed,
             )
         };
@@ -431,6 +460,88 @@ impl AppState {
                 }
             }
             Err(e) => log::warn!("Durchlauf nicht serialisierbar: {e}"),
+        }
+    }
+
+    /// Merkt eine verarbeitete Nachricht und schreibt das Gedaechtnis weg
+    /// (E-36).
+    pub fn remember_mail(&self, hash: String) {
+        let bytes = {
+            let Ok(mut seen) = self.seen_mails.lock() else {
+                return;
+            };
+            seen.insert(hash);
+            serde_json::to_vec(&*seen)
+        };
+        if let Ok(bytes) = bytes {
+            if let Err(e) = std::fs::write(&self.seen_mails_path, bytes) {
+                log::warn!("Mail-Gedaechtnis nicht schreibbar: {e}");
+            }
+        }
+    }
+
+    /// Nimmt einen Abruf ins Protokoll auf und schreibt es weg (F6).
+    ///
+    /// Sofort auf die Platte statt im Takt des Cache-Index: das Protokoll
+    /// waechst um einen Eintrag je Viertelstunde, und wer es liest, tut das
+    /// meist nach einem Neustart — genau dann waere ein ungeschriebener
+    /// Eintrag der interessanteste.
+    pub fn record_fetch(&self, entry: crate::mail::log::FetchLogEntry) {
+        let bytes = {
+            let Ok(mut log) = self.fetch_log.lock() else {
+                return;
+            };
+            log.push(entry);
+            serde_json::to_vec(&*log)
+        };
+        match bytes {
+            Ok(bytes) => {
+                if let Err(e) = std::fs::write(&self.fetch_log_path, bytes) {
+                    log::warn!("Abruf-Protokoll nicht schreibbar: {e}");
+                }
+            }
+            Err(e) => log::warn!("Abruf-Protokoll nicht serialisierbar: {e}"),
+        }
+    }
+}
+
+/// Laedt das Gedaechtnis verarbeiteter Nachrichten (E-36).
+///
+/// `rebuild` ist zwingend: die Suchmenge wird nicht mitgespeichert, und ohne
+/// sie erinnerte das Gedaechtnis nichts — der Fehler kaeme still zurueck.
+fn load_seen_mails(path: &Path) -> crate::mail::seen::SeenMails {
+    let mut seen: crate::mail::seen::SeenMails = match std::fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+            log::warn!("Mail-Gedaechtnis unlesbar, beginne neu: {e}");
+            Default::default()
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Default::default(),
+        Err(e) => {
+            log::warn!("Mail-Gedaechtnis nicht lesbar: {e}");
+            Default::default()
+        }
+    };
+    seen.rebuild();
+    seen
+}
+
+/// Laedt das Abruf-Protokoll, falls eines gespeichert ist (F6).
+///
+/// Wie beim Durchlauf: ein unlesbarer Stand beginnt neu, statt den Start zu
+/// verhindern (NF-02). Ein verlorenes Protokoll ist aergerlich, eine App, die
+/// deswegen nicht startet, waere schlimmer.
+fn load_fetch_log(path: &Path) -> crate::mail::log::FetchLog {
+    match std::fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+            log::warn!("Abruf-Protokoll unlesbar, beginne neu: {e}");
+            crate::mail::log::FetchLog::default()
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            crate::mail::log::FetchLog::default()
+        }
+        Err(e) => {
+            log::warn!("Abruf-Protokoll nicht lesbar: {e}");
+            crate::mail::log::FetchLog::default()
         }
     }
 }

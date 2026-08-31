@@ -11,8 +11,9 @@ import ToggleSwitch from '../ToggleSwitch.vue'
 import * as api from '@/lib/api'
 import { useConfigStore } from '@/stores/config'
 import { formatBytes } from '@/lib/format'
+import { currentDevice } from '@/lib/device'
 import { localeTag, type Language } from '@/lib/i18n'
-import { EVENTS, type MqttStatus } from '@/lib/types'
+import { EVENTS, type DatabaseCheck, type MqttStatus, type StorageBreakdown } from '@/lib/types'
 
 const { t } = useI18n()
 const store = useConfigStore()
@@ -32,6 +33,7 @@ const mqtt = ref<MqttStatus>({ running: false, connected: false, lastError: null
 let unlistenMqtt: UnlistenFn | null = null
 
 onMounted(async () => {
+  void loadBreakdown()
   mqttHasPassword.value = await api.hasMqttPassword().catch(() => false)
   mqtt.value = await api.mqttStatus().catch(() => mqtt.value)
   unlistenMqtt = await listen<MqttStatus>(EVENTS.mqtt, (e) => {
@@ -85,6 +87,90 @@ function flash(message: string) {
  * Sandkasten des Anzeigefensters unterbindet Downloads, und auf einem Tablet
  * ohne Tastatur ist die Zwischenablage der kürzere Weg.
  */
+// ── Speicher, Datenbank, Diagnose (Wartung F9–F11, E-31) ────────────────────
+// Nach E-31 kein eigener Navigationsbereich: was den Speicher und die Ablage
+// betrifft, steht bei System.
+const breakdown = ref<StorageBreakdown | null>(null)
+const dbCheck = ref<DatabaseCheck | null>(null)
+const dbBusy = ref(false)
+const dbNotice = ref<string | null>(null)
+const report = ref<string | null>(null)
+const reportNotice = ref<string | null>(null)
+const reportError = ref<string | null>(null)
+
+async function loadBreakdown() {
+  try {
+    breakdown.value = await api.storageBreakdown()
+  } catch (e) {
+    // Beigabe: ihr Fehlen darf die Einstellungen darunter nicht sperren.
+    console.warn('Speicheruebersicht nicht ladbar', e)
+  }
+}
+
+async function runCheck() {
+  dbBusy.value = true
+  dbNotice.value = null
+  try {
+    dbCheck.value = await api.checkDatabase()
+  } finally {
+    dbBusy.value = false
+  }
+}
+
+async function runRepair() {
+  const c = dbCheck.value
+  if (!c) return
+  if (
+    !confirm(
+      t('system.databaseRepairAsk', {
+        orphan: c.orphanFiles.length + c.orphanThumbs.length,
+        missing: c.missingFiles.length,
+      }),
+    )
+  )
+    return
+
+  dbBusy.value = true
+  try {
+    const frei = await api.repairDatabase()
+    dbNotice.value = t('system.databaseRepaired', { bytes: formatBytes(frei, locale.value) })
+    // Neu pruefen statt das alte Ergebnis stehen zu lassen: sonst boete die
+    // Oberflaeche weiter „Aufraeumen" fuer etwas an, das schon weg ist.
+    dbCheck.value = await api.checkDatabase()
+    await loadBreakdown()
+  } finally {
+    dbBusy.value = false
+  }
+}
+
+/** Erzeugt den Bericht und zeigt ihn, bevor er irgendwo hingeht (F11). */
+async function makeReport() {
+  reportNotice.value = null
+  reportError.value = null
+  // Geraet und Fassung aus der WebView-Kennung statt aus einem Plugin: fuer
+  // zwei Zeichenketten eine Abhaengigkeit samt Android-Anteil aufzunehmen
+  // stuende in keinem Verhaeltnis (siehe `lib/device.ts`).
+  const { androidRelease, deviceModel } = currentDevice()
+  try {
+    report.value = await api.diagnosticReport(androidRelease, deviceModel)
+  } catch (e) {
+    // Ohne diesen Zweig blieb ein Fehlschlag unsichtbar: die Zusage wurde
+    // abgelehnt, niemand fing sie auf, und die Schaltflaeche tat scheinbar
+    // nichts. Am Geraet zweimal getippt, ohne eine einzige Spur.
+    reportError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function copyReport() {
+  if (!report.value) return
+  try {
+    await navigator.clipboard.writeText(report.value)
+    reportNotice.value = t('system.diagnosticsCopied')
+  } catch (e) {
+    reportNotice.value = String(e)
+  }
+}
+
 async function exportConfig() {
   try {
     const json = await api.exportConfig()
@@ -189,6 +275,79 @@ async function importConfig() {
 
     <!-- Heimnetz-Steuerung (FA-55). Der Server wird beim Speichern sofort neu
          gebunden, ein Neustart der App ist nicht nötig. -->
+    <!-- Wartung F9–F11 (E-31): Speicher und Datenbank stehen bei System. -->
+    <section>
+      <h3 class="ss-label">{{ t('system.storage') }}</h3>
+
+      <div v-if="breakdown" class="breakdown">
+        <div class="col">
+          <h4 class="ss-label">{{ t('system.storageByYear') }}</h4>
+          <ul>
+            <li v-for="g in breakdown.byYear" :key="g.label">
+              <span class="label">{{ g.label === '—' ? t('system.storageUnknown') : g.label }}</span>
+              <span class="count">{{ t('system.storagePhotos', { n: g.count }, g.count) }}</span>
+              <span class="bytes">{{ formatBytes(g.bytes, locale) }}</span>
+            </li>
+          </ul>
+        </div>
+        <div v-if="breakdown.bySender.length" class="col">
+          <h4 class="ss-label">{{ t('system.storageBySender') }}</h4>
+          <ul>
+            <li v-for="g in breakdown.bySender" :key="g.label">
+              <span class="label">{{ g.label }}</span>
+              <span class="count">{{ t('system.storagePhotos', { n: g.count }, g.count) }}</span>
+              <span class="bytes">{{ formatBytes(g.bytes, locale) }}</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <SettingRow :label="t('system.database')" :hint="t('system.databaseHint')">
+        <button class="secondary" :disabled="dbBusy" @click="runCheck">
+          {{ t('system.databaseCheck') }}
+        </button>
+      </SettingRow>
+
+      <p v-if="dbCheck" class="db-result">
+        <template v-if="dbCheck.missingFiles.length === 0 && dbCheck.orphanFiles.length === 0 && dbCheck.orphanThumbs.length === 0">
+          {{ t('system.databaseClean') }}
+        </template>
+        <template v-else>
+          {{
+            t('system.databaseFound', {
+              missing: dbCheck.missingFiles.length,
+              orphan: dbCheck.orphanFiles.length + dbCheck.orphanThumbs.length,
+              bytes: formatBytes(dbCheck.reclaimableBytes, locale),
+            })
+          }}
+          <button class="danger inline" :disabled="dbBusy" @click="runRepair">
+            {{ t('system.databaseRepair') }}
+          </button>
+        </template>
+      </p>
+      <p v-if="dbNotice" class="notice">{{ dbNotice }}</p>
+
+      <SettingRow :label="t('system.diagnostics')" :hint="t('system.diagnosticsHint')">
+        <button class="secondary" @click="makeReport">
+          {{ t('system.diagnosticsShow') }}
+        </button>
+      </SettingRow>
+      <p v-if="reportError" class="db-result error">{{ reportError }}</p>
+    </section>
+
+    <!-- Der Bericht wird gezeigt, bevor er irgendwohin geht: was das Geraet
+         verlaesst, soll vorher jemand gesehen haben (F11). -->
+    <div v-if="report" class="backdrop" @click.self="report = null">
+      <div class="report" role="dialog" aria-modal="true">
+        <pre>{{ report }}</pre>
+        <p v-if="reportNotice" class="notice">{{ reportNotice }}</p>
+        <div class="actions">
+          <button class="primary" @click="copyReport">{{ t('system.diagnosticsCopy') }}</button>
+          <button class="secondary" @click="report = null">{{ t('system.diagnosticsClose') }}</button>
+        </div>
+      </div>
+    </div>
+
     <section>
       <h3 class="ss-label">{{ t('system.remote') }}</h3>
 
@@ -352,6 +511,110 @@ async function importConfig() {
 </template>
 
 <style scoped>
+/* ── Speicher, Datenbank, Diagnose (Wartung F9–F11) ─────────────────────── */
+
+.breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin-bottom: 18px;
+}
+
+.breakdown .col {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.breakdown ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.breakdown li {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+}
+
+/* Die Beschriftung darf kuerzen, die Zahlen nie — sonst stuende dort „1,2…" */
+.breakdown .label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breakdown .count,
+.breakdown .bytes {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--ss-text-dim);
+}
+
+.db-result {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--ss-text-dim);
+}
+
+.db-result.error {
+  color: var(--ss-error);
+}
+
+.db-result .inline {
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+/* Ohne diese Regel stand der Bericht inline unter der Schaltflaeche — am
+   Geraet ausserhalb des sichtbaren Bereichs, und ich hielt ihn zweimal fuer
+   nicht erzeugt. Die Klasse gibt es in `SourceDialog` schon, Stile sind aber
+   je Komponente gekapselt und werden nicht mitgeerbt. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.report {
+  width: min(760px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--ss-border-soft);
+  border-radius: 16px;
+  background: var(--ss-surface);
+}
+
+/* Der Bericht ist Fliesstext in fester Breite — umgebrochen waere die
+   Spaltenausrichtung hin, und die traegt hier die Lesbarkeit. */
+.report pre {
+  margin: 0;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.report .actions {
+  display: flex;
+  gap: 10px;
+}
+
 .pane {
   height: 100%;
   padding-right: 8px;

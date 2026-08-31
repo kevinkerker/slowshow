@@ -107,14 +107,30 @@ if ($apk.Name -like "*unsigned*") {
     exit 1
 }
 
+# Ohne Geraet gibt es nichts zu installieren. Das ist kein Fehler des Baus,
+# aber auch kein Erfolg des Deploys -- der Rueckgabewert muss es sagen.
+#
+# Hier stand bis heute ein zweiter, gleichlautender Block mit `exit 0` davor.
+# Der Zusatz war damit unerreichbar: toter Code, der wie eine Absicherung
+# aussah. Aufgefallen erst, als wirklich kein Geraet angeschlossen war.
 if (-not $devices) {
-    Write-Host "Kein Geraet verbunden - Installation uebersprungen."
-    exit 0
+    Write-Warning "APK gebaut, aber nicht installiert: kein Geraet verbunden."
+    exit 2
 }
 
 Write-Host "Installiere..."
 & $adb install -r $apk.FullName
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "Starte App..."
-    & $adb shell am start -n "dev.kerker.slowshow/.MainActivity"
+if ($LASTEXITCODE -ne 0) {
+    # Vorher endete das Skript hier still mit 0. Wer den Rueckgabewert als
+    # Erfolgsmerkmal nahm -- ein Skript, eine Pipeline, ein Agent --, hielt
+    # einen abgezogenen USB-Stecker fuer einen geglueckten Deploy.
+    Write-Error "Installation fehlgeschlagen. Geraet noch angeschlossen und entsperrt?"
+    exit 1
+}
+
+Write-Host "Starte App..."
+& $adb shell am start -n "dev.kerker.slowshow/.MainActivity"
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "App liess sich nicht starten."
+    exit 1
 }

@@ -24,8 +24,10 @@ pub mod commands;
 pub mod config;
 pub mod control;
 pub mod decode;
+pub mod mail;
 pub mod model;
 pub mod mqtt;
+pub mod maintenance;
 pub mod orientation;
 pub mod playlist;
 pub mod remote;
@@ -39,8 +41,32 @@ pub mod sync;
 use mqtt::MqttService;
 use remote::RemoteServer;
 use state::{events, AppState};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tauri::{Emitter, Manager};
+
+/// Gesetzt, sobald die App wirklich beendet wird.
+///
+/// Anlass: nach einem Neuinstallieren ueber die laufende App starb der Prozess
+/// mit `FORTIFY: pthread_mutex_lock called on a destroyed mutex`. Die drei
+/// Hintergrundschleifen liefen endlos und griffen ueber `app.state::<…>()`
+/// weiter auf den Zustand zu, den Tauri beim Beenden schon abgeraeumt hatte.
+///
+/// Zwei Sicherungen, weil eine allein eine Luecke laesst: der Abbruch der
+/// Aufgaben greift sofort, wenn sie an einem `await` stehen — das ist fast
+/// immer der Fall, weil sie den Grossteil der Zeit auf den naechsten Takt
+/// warten. Diese Marke faengt den Rest ab, falls eine Aufgabe gerade zwischen
+/// zwei Wartepunkten rechnet.
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+
+/// Laeuft die App noch? Von den Hintergrundschleifen an jedem Takt geprueft.
+fn still_running() -> bool {
+    !SHUTTING_DOWN.load(Ordering::Relaxed)
+}
+
+/// Laufende Hintergrundaufgaben, damit sie beim Beenden abgebrochen werden.
+#[derive(Default)]
+struct BackgroundTasks(std::sync::Mutex<Vec<tauri::async_runtime::JoinHandle<()>>>);
 
 /// Wie oft der Zeitgeber prüft, ob eine Quelle synchronisiert werden muss (FA-28).
 const SYNC_TICK: Duration = Duration::from_secs(60);
@@ -97,6 +123,22 @@ pub fn run() {
             commands::exclude_image,
             commands::include_image,
             commands::image_page,
+            commands::release_quarantine,
+            commands::quarantine_count,
+            commands::resync_mailbox,
+            commands::cancel_resync,
+            commands::diagnostic_report,
+            commands::storage_breakdown,
+            commands::check_database,
+            commands::repair_database,
+            commands::fetch_log,
+            commands::last_fetch,
+            commands::playback_stats,
+            commands::restart_cycle,
+            commands::reset_history,
+            commands::allowed_senders,
+            commands::remove_allowed_sender,
+            commands::filter_facets,
             commands::set_frame_orientation,
             commands::apply_orientation,
             commands::cache_stats,
@@ -146,6 +188,7 @@ pub fn run() {
             // ist die Brücke sicher da.
             app.manage(RemoteServer::default());
             app.manage(MqttService::default());
+            app.manage(BackgroundTasks::default());
 
             // FA-55: Heimnetz-Steuerung starten, falls konfiguriert.
             let handle = app.handle().clone();
@@ -175,6 +218,15 @@ pub fn run() {
             // neu aufgebaut wird — dann liefe die Steuerung aus FA-55 nach
             // einer Drehung oder einem Konfigurationswechsel nicht mehr.
             if matches!(event, tauri::RunEvent::Exit) {
+                // Reihenfolge: erst die Schleifen anhalten, dann die Dienste.
+                // Andersherum koennte ein Takt dazwischenfunken und einen
+                // gerade abgeschalteten Dienst noch einmal anfassen.
+                SHUTTING_DOWN.store(true, Ordering::Relaxed);
+                if let Ok(mut guard) = app.state::<BackgroundTasks>().0.lock() {
+                    for handle in guard.drain(..) {
+                        handle.abort();
+                    }
+                }
                 app.state::<RemoteServer>().stop();
                 app.state::<MqttService>().stop();
             }
@@ -275,12 +327,14 @@ fn watch_state_for_mqtt(app: &tauri::AppHandle) {
 
 /// Startet die drei Dauerläufer der App.
 fn spawn_background_tasks(app: tauri::AppHandle) {
+    let mut handles = Vec::new();
+
     // 1. Fällige Synchronisierungen (FA-28).
     let sync_app = app.clone();
-    tauri::async_runtime::spawn(async move {
+    handles.push(tauri::async_runtime::spawn(async move {
         let mut ticker = tokio::time::interval(SYNC_TICK);
         // Der erste Tick feuert sofort — beim Start soll einmal geprüft werden.
-        loop {
+        while still_running() {
             ticker.tick().await;
             match commands::run_sync(&sync_app, None, true).await {
                 Ok(reports) if !reports.is_empty() => {
@@ -293,14 +347,14 @@ fn spawn_background_tasks(app: tauri::AppHandle) {
                 _ => {}
             }
         }
-    });
+    }));
 
     // 2. Zeitplan und Helligkeit (FA-52–54).
     let display_app = app.clone();
-    tauri::async_runtime::spawn(async move {
+    handles.push(tauri::async_runtime::spawn(async move {
         let mut ticker = tokio::time::interval(DISPLAY_TICK);
         let mut last: Option<schedule::DisplayState> = None;
-        loop {
+        while still_running() {
             ticker.tick().await;
             let current = display_app.state::<AppState>().display_state();
             if last != Some(current) {
@@ -310,14 +364,49 @@ fn spawn_background_tasks(app: tauri::AppHandle) {
                 last = Some(current);
             }
         }
-    });
+    }));
 
     // 3. Cache-Index sichern.
-    tauri::async_runtime::spawn(async move {
+    let flush_app = app.clone();
+    handles.push(tauri::async_runtime::spawn(async move {
         let mut ticker = tokio::time::interval(FLUSH_TICK);
-        loop {
+        while still_running() {
             ticker.tick().await;
-            app.state::<AppState>().flush();
+            flush_app.state::<AppState>().flush();
         }
-    });
+    }));
+
+    if let Ok(mut guard) = app.state::<BackgroundTasks>().0.lock() {
+        *guard = handles;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Das Abbruchsignal der Hintergrundschleifen.
+    ///
+    /// Was dieser Test leistet: er haelt fest, dass `still_running()` die Marke
+    /// richtig herum liest. Ein verlorenes `!` waere sonst nicht zu sehen — die
+    /// Schleifen liefen weiter wie zuvor, und der Absturz beim Beenden kaeme
+    /// zurueck.
+    ///
+    /// Was er nicht leisten kann: den Abbruch der Aufgaben selbst. Dafuer
+    /// braeuchte es eine laufende Tauri-App mit angemeldetem Zustand, und die
+    /// gibt es in einem Unit-Test nicht. Der Beweis dafuer ist am Geraet
+    /// gefuehrt worden — Beenden ueber Zurueck, danach leerer Absturzpuffer.
+    ///
+    /// Der Test ist der einzige, der die Marke anfasst, und setzt sie am Ende
+    /// zurueck; sonst faerbte er andere Tests im selben Prozess ein.
+    #[test]
+    fn abbruchsignal_haelt_die_schleifen_an() {
+        assert!(still_running(), "vor dem Beenden laufen die Schleifen");
+
+        SHUTTING_DOWN.store(true, Ordering::Relaxed);
+        assert!(!still_running(), "nach dem Beenden nicht mehr");
+
+        SHUTTING_DOWN.store(false, Ordering::Relaxed);
+        assert!(still_running(), "zurueckgesetzt fuer die uebrigen Tests");
+    }
 }

@@ -98,9 +98,24 @@ export const useConfigStore = defineStore('config', () => {
     if (!config.value) return
     const draft: AppConfig = JSON.parse(JSON.stringify(config.value))
     change(draft)
+
+    // Vorher merken, um danach zu erkennen, ob die Cache-Grenze sich geaendert
+    // hat. Am Geraet gemeldet: die maximale Cachegroesse liess sich unter
+    // „System" umstellen, in der Fusszeile der Quellenliste stand aber weiter
+    // der alte Wert — die Statistik traegt `maxBytes`, und `patch` hat sie nie
+    // erneuert. `addSource` und `removeSource` taten es, deshalb sprang die
+    // Zahl irgendwann doch um und der Fehler sah nach Zufall aus.
+    const vorher = config.value.cache.maxBytes
+
     config.value = await api.setConfig(draft)
     applyLanguage(config.value.language)
     display.value = await api.getDisplayState()
+
+    // Nur bei Bedarf: `cacheStats` laeuft ueber den ganzen Index, und `patch`
+    // feuert bei jedem Schalter.
+    if (config.value.cache.maxBytes !== vorher) {
+      await refreshStats()
+    }
   }
 
   async function addSource(source: Source, password?: string) {

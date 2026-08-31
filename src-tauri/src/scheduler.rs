@@ -420,6 +420,7 @@ mod tests {
             added_at,
             last_shown,
             show_count: 0,
+            mail: None,
             excluded: false,
             thumb_bytes: None,
         }

@@ -23,7 +23,12 @@ serde_json          = "1"
 
 # Bilddekodierung und -skalierung im Rust-Prozess (NF-13).
 # default-features = false + explizite Formatliste haelt die Binaergroesse klein (NF-10).
-image               = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+# Nur die Formate, die wirklich vorkommen — jedes weitere waere Code im
+# APK fuer einen Fall, den es nicht gibt. GIF liefert das erste Einzelbild
+# (E-37); alle vier sind reines Rust und brauchen keinen C-Cross-Compile.
+image               = { version = "0.25", default-features = false, features = [
+    "jpeg", "png", "webp", "bmp", "tiff", "ico", "gif",
+] }
 kamadak-exif        = "0.6"
 
 # Netzwerkquellen (FA-21, FA-23). rustls + webpki-roots statt native-roots:
@@ -46,6 +51,12 @@ getrandom           = "0.2"
 chrono              = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
 log                 = "0.4"
 thiserror           = "2"
+async-imap = { version = "0.11.3", default-features = false, features = ["runtime-tokio"] }
+mail-parser = { version = "0.11.8", default-features = false }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12", "logging"] }
+webpki-roots = "1.0.9"
+futures = { version = "0.3.34", default-features = false, features = ["std"] }
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "tls12", "logging", "std"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"

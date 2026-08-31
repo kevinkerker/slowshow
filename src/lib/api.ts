@@ -7,18 +7,25 @@
  */
 
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
+import { EVENTS } from './types'
 import type {
   Album,
   AppConfig,
   CacheEntry,
   CacheStats,
   DisplayState,
+  FilterFacets,
   ImageFilter,
   ImagePage,
   MqttStatus,
   Slide,
   Source,
   SyncReport,
+  PlaybackStats,
+  FetchLogEntry,
+  ResyncProgress,
+  StorageBreakdown,
+  DatabaseCheck,
 } from './types'
 
 /**
@@ -79,6 +86,21 @@ export const setFrameOrientation = (portrait: boolean): Promise<void> =>
  */
 export const applyOrientation = (): Promise<void> => invoke('apply_orientation')
 
+/**
+ * Gibt ein Foto aus der Quarantäne frei (F4, E-31).
+ *
+ * `trustSender` nimmt den Absender dauerhaft in die Freigabeliste und holt
+ * alle seine wartenden Fotos mit. Liefert die Anzahl freigegebener Bilder.
+ */
+export const releaseQuarantine = (id: string, trustSender: boolean): Promise<number> =>
+  invoke('release_quarantine', { id, trustSender })
+
+/** Jahre und Absender mit Anzahl, für die Filterauswahl (F5). */
+export const filterFacets = (): Promise<FilterFacets> => invoke('filter_facets')
+
+/** Wie viele Fotos auf Freigabe warten — Grundlage des Hinweises (E-31). */
+export const quarantineCount = (): Promise<number> => invoke('quarantine_count')
+
 export const getConfig = (): Promise<AppConfig> => invoke('get_config')
 
 export const setConfig = (config: AppConfig): Promise<AppConfig> =>
@@ -132,8 +154,117 @@ export const updateSource = (source: Source, password?: string): Promise<AppConf
 
 export const removeSource = (id: string): Promise<AppConfig> => invoke('remove_source', { id })
 
-export const testSource = (source: Source, password: string): Promise<void> =>
+/**
+ * Prüft eine Quelle. Bei einem Postfach kommt die Zahl der ungelesenen
+ * Nachrichten zurück, sonst `null` — die Zahl belegt beim Einrichten, dass
+ * auch der richtige Ordner gewählt ist.
+ */
+export const testSource = (source: Source, password: string): Promise<number | null> =>
   invoke('test_source', { source, password })
+
+/**
+ * Gleicht ein Postfach vollständig neu ab (Wartung F8).
+ *
+ * Läuft in Stapeln à 50 mit Pause dazwischen, damit die Diashow weiterläuft.
+ * Vorhandene Fotos bleiben unangetastet. Liefert die Zahl der neu abgelegten.
+ */
+export const resyncMailbox = (sourceId: string): Promise<number> =>
+  invoke('resync_mailbox', { sourceId })
+
+/**
+ * Hört auf den Fortschritt eines Neuabgleichs (Wartung F8).
+ *
+ * Der Aufruf von `resyncMailbox` läuft minutenlang und könnte am Ende nur
+ * „fertig" oder „fehlgeschlagen" melden. Der Zwischenstand kommt deshalb als
+ * Ereignis. Gibt die Abmeldefunktion zurück.
+ */
+export const onResyncProgress = async (
+  handler: (p: ResyncProgress) => void,
+): Promise<() => void> => {
+  const { listen } = await import('@tauri-apps/api/event')
+  return listen<ResyncProgress>(EVENTS.resync, (e) => handler(e.payload))
+}
+
+/** Bricht einen laufenden Neuabgleich ab (Wartung F8). */
+export const cancelResync = (): Promise<void> => invoke('cancel_resync')
+
+/** Belegung nach Jahr und Absender (Wartung F9). */
+export const storageBreakdown = (): Promise<StorageBreakdown> => invoke('storage_breakdown')
+
+/** Vergleicht Index und Dateibestand. Ändert nichts (Wartung F10). */
+export const checkDatabase = (): Promise<DatabaseCheck> => invoke('check_database')
+
+/**
+ * Räumt auf, was die Prüfung findet (Wartung F10).
+ *
+ * Prüft im Backend erneut, statt dem angezeigten Ergebnis zu vertrauen —
+ * dazwischen kann ein Sync gelaufen sein. Liefert die freigewordenen Bytes.
+ */
+export const repairDatabase = (): Promise<number> => invoke('repair_database')
+
+/**
+ * Baut den anonymisierten Diagnosebericht (Wartung F11).
+ *
+ * Enthält keine Mailadressen, Servernamen, Quellennamen oder Dateinamen;
+ * Absender erscheinen als „Absender A". Serverfehler sind auf die erste Zeile
+ * und 200 Zeichen gekürzt.
+ */
+export const diagnosticReport = (
+  androidRelease: string,
+  deviceModel: string,
+): Promise<string> => invoke('diagnostic_report', { androidRelease, deviceModel })
+
+/** Die letzten Postfach-Abrufe, neueste zuerst (Wartung F6). */
+export const fetchLog = (): Promise<FetchLogEntry[]> => invoke('fetch_log')
+
+/**
+ * Stand des letzten Abrufs einer Quelle (Wartung F5).
+ *
+ * `null`, solange noch nie abgerufen wurde.
+ */
+export const lastFetch = (sourceId: string): Promise<FetchLogEntry | null> =>
+  invoke('last_fetch', { sourceId })
+
+/** Statistik der Zufallswiedergabe (Wartung F1). */
+export const playbackStats = (): Promise<PlaybackStats> => invoke('playback_stats')
+
+/**
+ * Beginnt den Durchlauf von vorn (Wartung F2).
+ *
+ * Nicht destruktiv: nur die Urne wird geleert. Anzeigezähler und Zeitpunkte
+ * bleiben — dafür gibt es `resetHistory`.
+ */
+export const restartCycle = (): Promise<void> => invoke('restart_cycle')
+
+/**
+ * Setzt Anzeigezeitpunkt und -zähler des aktuellen Bestands zurück (F3).
+ *
+ * Liefert die Zahl der geänderten Einträge. Destruktiv — die Oberfläche fragt
+ * vorher nach.
+ */
+export const resetHistory = (): Promise<number> => invoke('reset_history')
+
+/** Ein freigegebener Absender samt Zahl seiner Fotos (F4, E-32). */
+export interface AllowedSender {
+  address: string
+  photoCount: number
+}
+
+export const allowedSenders = (sourceId: string): Promise<AllowedSender[]> =>
+  invoke('allowed_senders', { sourceId })
+
+/**
+ * Nimmt einen Absender von der Freigabeliste.
+ *
+ * `requarantine` entscheidet über die vorhandenen Fotos: nur künftige Mails
+ * wieder prüfen, oder auch die alten Bilder erneut warten lassen (E-32).
+ * Liefert die Zahl der Fotos, die zurück in die Quarantäne gegangen sind.
+ */
+export const removeAllowedSender = (
+  sourceId: string,
+  sender: string,
+  requarantine: boolean,
+): Promise<number> => invoke('remove_allowed_sender', { sourceId, sender, requarantine })
 
 export const listNextcloudAlbums = (
   url: string,

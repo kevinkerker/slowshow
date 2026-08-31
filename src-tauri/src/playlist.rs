@@ -11,7 +11,7 @@
 //! Diashow, ohne die Reihenfolge der übrigen durcheinanderzubringen (FA-28).
 
 use crate::cache::{CacheEntry, CacheIndex};
-use crate::model::PlayOrder;
+use crate::model::{PlaybackFilter, PlayOrder, TimeFilter};
 use std::collections::HashSet;
 
 /// Was in einem Anzeigeschritt auf dem Schirm steht.
@@ -54,6 +54,45 @@ impl Slide {
     }
 }
 
+/// Passt ein Bild zur Auswahl aus F5?
+///
+/// Reine Funktion mit hereingereichter Zeit: sonst wären „letzte 12 Monate"
+/// und „dieses Jahr" nur am Kalender des Testrechners prüfbar.
+pub fn matches_filter(entry: &CacheEntry, filter: &PlaybackFilter, now: i64) -> bool {
+    if !filter.senders.is_empty() {
+        let sender = entry.mail.as_ref().map(|m| m.sender.as_str());
+        match sender {
+            Some(s) if filter.senders.iter().any(|f| f.eq_ignore_ascii_case(s)) => {}
+            // Ist nach Absendern gefiltert, fallen Bilder ohne Absender heraus
+            // — bei einer Auswahl „von Oma" will niemand den Nextcloud-Ordner
+            // dazwischen.
+            _ => return false,
+        }
+    }
+
+    let taken = entry.taken_at;
+    if taken.is_none() {
+        return filter.include_undated;
+    }
+    let taken = taken.unwrap_or(0);
+
+    match &filter.time {
+        TimeFilter::All => true,
+        TimeFilter::Last12Months => taken >= now - 365 * 86_400,
+        TimeFilter::ThisYear => year_of(taken) == year_of(now),
+        TimeFilter::Years(years) => years.is_empty() || years.contains(&year_of(taken)),
+    }
+}
+
+/// Kalenderjahr eines Zeitstempels in UTC.
+pub fn year_of(ts: i64) -> i32 {
+    use chrono::{Datelike, TimeZone, Utc};
+    Utc.timestamp_opt(ts, 0)
+        .single()
+        .map(|d| d.year())
+        .unwrap_or(0)
+}
+
 /// Sortierschlüssel eines Bildes für die Zufallsreihenfolge.
 ///
 /// FNV-1a über Seed und Id, danach die Streuung aus splitmix64 — ohne die
@@ -90,11 +129,16 @@ pub fn build_order(
     enabled_sources: &HashSet<String>,
     order: PlayOrder,
     newest_first: bool,
+    filter: &PlaybackFilter,
+    now: i64,
     seed: u64,
 ) -> Vec<String> {
     let mut entries: Vec<&CacheEntry> = index
         .values()
-        .filter(|e| !e.excluded && enabled_sources.contains(&e.source_id))
+        // Quarantaenefotos gehoeren noch nicht zum Bestand (F4, E-31): sie
+        // liegen im Cache, warten aber auf Freigabe.
+        .filter(|e| !e.excluded && !e.is_quarantined() && enabled_sources.contains(&e.source_id))
+        .filter(|e| matches_filter(e, filter, now))
         .collect();
 
     match order {
@@ -301,6 +345,7 @@ mod tests {
             last_shown: None,
             excluded: false,
             show_count: 0,
+            mail: None,
             thumb_bytes: None,
         }
     }
@@ -395,7 +440,7 @@ mod tests {
             entry("2", "s", "apfel.jpg"),
             entry("3", "s", "Bild.jpg"),
         ]);
-        let o = build_order(&idx, &sources(&["s"]), PlayOrder::FileName, false, 1);
+        let o = build_order(&idx, &sources(&["s"]), PlayOrder::FileName, false, &PlaybackFilter::default(), 0, 1);
         assert_eq!(o, vec!["2", "3", "1"]);
     }
 
@@ -409,7 +454,7 @@ mod tests {
         c.remote_mtime = Some(200); // kein EXIF -> Rückfall auf mtime
         let idx = index_of(vec![a, b, c]);
 
-        let o = build_order(&idx, &sources(&["s"]), PlayOrder::Chronological, false, 1);
+        let o = build_order(&idx, &sources(&["s"]), PlayOrder::Chronological, false, &PlaybackFilter::default(), 0, 1);
         assert_eq!(o, vec!["2", "3", "1"]);
     }
 
@@ -421,7 +466,7 @@ mod tests {
         b.remote_mtime = Some(100);
         let idx = index_of(vec![a, b]);
         assert_eq!(
-            build_order(&idx, &sources(&["s"]), PlayOrder::Chronological, false, 1),
+            build_order(&idx, &sources(&["s"]), PlayOrder::Chronological, false, &PlaybackFilter::default(), 0, 1),
             vec!["2", "1"]
         );
     }
@@ -433,9 +478,9 @@ mod tests {
                 .map(|i| entry(&format!("{i:02}"), "s", "x.jpg"))
                 .collect(),
         );
-        let a = build_order(&idx, &sources(&["s"]), PlayOrder::Random, false, 12345);
-        let b = build_order(&idx, &sources(&["s"]), PlayOrder::Random, false, 12345);
-        let c = build_order(&idx, &sources(&["s"]), PlayOrder::Random, false, 99999);
+        let a = build_order(&idx, &sources(&["s"]), PlayOrder::Random, false, &PlaybackFilter::default(), 0, 12345);
+        let b = build_order(&idx, &sources(&["s"]), PlayOrder::Random, false, &PlaybackFilter::default(), 0, 12345);
+        let c = build_order(&idx, &sources(&["s"]), PlayOrder::Random, false, &PlaybackFilter::default(), 0, 99999);
 
         assert_eq!(a, b, "gleicher Seed -> gleiche Reihenfolge");
         assert_ne!(a, c, "anderer Seed -> andere Reihenfolge");
@@ -453,7 +498,7 @@ mod tests {
             entry("1", "aktiv", "a.jpg"),
             entry("2", "aus", "b.jpg"),
         ]);
-        let o = build_order(&idx, &sources(&["aktiv"]), PlayOrder::FileName, false, 1);
+        let o = build_order(&idx, &sources(&["aktiv"]), PlayOrder::FileName, false, &PlaybackFilter::default(), 0, 1);
         assert_eq!(o, vec!["1"]);
     }
 
@@ -463,7 +508,7 @@ mod tests {
         b.excluded = true;
         let idx = index_of(vec![entry("1", "s", "a.jpg"), b]);
         assert_eq!(
-            build_order(&idx, &sources(&["s"]), PlayOrder::FileName, false, 1),
+            build_order(&idx, &sources(&["s"]), PlayOrder::FileName, false, &PlaybackFilter::default(), 0, 1),
             vec!["1"]
         );
     }
@@ -654,7 +699,7 @@ mod tests {
             .map(|i| entry(&format!("{i:02}"), "s", "x.jpg"))
             .collect();
         let idx_vorher = index_of(vorher.clone());
-        let alt = build_order(&idx_vorher, &sources(&["s"]), PlayOrder::Random, false, 4242);
+        let alt = build_order(&idx_vorher, &sources(&["s"]), PlayOrder::Random, false, &PlaybackFilter::default(), 0, 4242);
 
         let mut nachher = vorher;
         nachher.push(entry("neu", "s", "neu.jpg"));
@@ -663,6 +708,8 @@ mod tests {
             &sources(&["s"]),
             PlayOrder::Random,
             false,
+            &PlaybackFilter::default(),
+            0,
             4242,
         );
 
@@ -682,7 +729,7 @@ mod tests {
                 .map(|i| entry(&format!("{i:02}"), "s", "x.jpg"))
                 .collect(),
         );
-        let zufall = build_order(&idx, &sources(&["s"]), PlayOrder::Random, false, 99);
+        let zufall = build_order(&idx, &sources(&["s"]), PlayOrder::Random, false, &PlaybackFilter::default(), 0, 99);
         let sortiert: Vec<String> = (0..30).map(|i| format!("{i:02}")).collect();
         assert_ne!(
             zufall, sortiert,
@@ -697,8 +744,155 @@ mod tests {
                 .map(|i| entry(&format!("{i:02}"), "s", "x.jpg"))
                 .collect(),
         );
-        let o = build_order(&idx, &sources(&["s"]), PlayOrder::Random, false, 0);
+        let o = build_order(&idx, &sources(&["s"]), PlayOrder::Random, false, &PlaybackFilter::default(), 0, 0);
         assert_eq!(o.len(), 10);
         assert_eq!(o.iter().collect::<HashSet<_>>().len(), 10);
+    }
+
+    // ── Auswahl der Bilder (F5) ──────────────────────────────────────────────
+
+    /// 1. Januar 2026, 12 Uhr UTC — fester Bezug statt `now()`.
+    const HEUTE: i64 = 1_767_268_800;
+
+    fn mit_datum(id: &str, taken_at: Option<i64>) -> CacheEntry {
+        CacheEntry {
+            taken_at,
+            ..entry(id, "s", id)
+        }
+    }
+
+    fn mit_absender(id: &str, sender: &str) -> CacheEntry {
+        CacheEntry {
+            mail: Some(crate::cache::index::MailMeta {
+                sender: sender.into(),
+                subject: "Hallo".into(),
+                message_id: "x".into(),
+                quarantined: false,
+            }),
+            ..entry(id, "s", id)
+        }
+    }
+
+    /// Unix-Zeit fuer den 1. Juli des Jahres.
+    fn im_jahr(year: i32) -> i64 {
+        use chrono::{TimeZone, Utc};
+        Utc.with_ymd_and_hms(year, 7, 1, 12, 0, 0).unwrap().timestamp()
+    }
+
+    #[test]
+    fn voreinstellung_zeigt_alles() {
+        let f = PlaybackFilter::default();
+        assert!(matches_filter(&mit_datum("a", Some(im_jahr(1987))), &f, HEUTE));
+        assert!(matches_filter(&mit_datum("b", Some(im_jahr(2025))), &f, HEUTE));
+        assert!(
+            matches_filter(&mit_datum("c", None), &f, HEUTE),
+            "ohne Aufnahmedatum darf ein Bild nicht stillschweigend verschwinden"
+        );
+    }
+
+    #[test]
+    fn jahresauswahl_laesst_nur_die_gewaehlten_durch() {
+        let f = PlaybackFilter {
+            time: TimeFilter::Years(vec![1987, 1999]),
+            include_undated: false,
+            ..Default::default()
+        };
+        assert!(matches_filter(&mit_datum("a", Some(im_jahr(1987))), &f, HEUTE));
+        assert!(matches_filter(&mit_datum("b", Some(im_jahr(1999))), &f, HEUTE));
+        assert!(!matches_filter(&mit_datum("c", Some(im_jahr(2001))), &f, HEUTE));
+    }
+
+    #[test]
+    fn leere_jahresauswahl_bedeutet_alle() {
+        // Sonst waere ein versehentliches Abwaehlen aller Jahre eine leere
+        // Diashow -- und niemand faende den Weg zurueck.
+        let f = PlaybackFilter {
+            time: TimeFilter::Years(vec![]),
+            ..Default::default()
+        };
+        assert!(matches_filter(&mit_datum("a", Some(im_jahr(1987))), &f, HEUTE));
+    }
+
+    #[test]
+    fn ohne_datum_laesst_sich_getrennt_zuschalten() {
+        let aus = PlaybackFilter {
+            time: TimeFilter::Years(vec![1987]),
+            include_undated: false,
+            ..Default::default()
+        };
+        let an = PlaybackFilter {
+            include_undated: true,
+            ..aus.clone()
+        };
+        assert!(!matches_filter(&mit_datum("a", None), &aus, HEUTE));
+        assert!(matches_filter(&mit_datum("a", None), &an, HEUTE));
+    }
+
+    #[test]
+    fn letzte_zwoelf_monate_sind_ein_rollendes_fenster() {
+        let f = PlaybackFilter {
+            time: TimeFilter::Last12Months,
+            include_undated: false,
+            ..Default::default()
+        };
+        assert!(matches_filter(&mit_datum("neu", Some(HEUTE - 30 * 86_400)), &f, HEUTE));
+        assert!(!matches_filter(&mit_datum("alt", Some(HEUTE - 400 * 86_400)), &f, HEUTE));
+    }
+
+    #[test]
+    fn dieses_jahr_meint_das_kalenderjahr() {
+        // Unterschied zu "letzte 12 Monate": am 1. Januar ist das Fenster
+        // fast leer, die Zwoelfmonatsauswahl dagegen voll.
+        let f = PlaybackFilter {
+            time: TimeFilter::ThisYear,
+            include_undated: false,
+            ..Default::default()
+        };
+        assert!(matches_filter(&mit_datum("a", Some(im_jahr(2026))), &f, HEUTE));
+        assert!(!matches_filter(&mit_datum("b", Some(im_jahr(2025))), &f, HEUTE));
+    }
+
+    #[test]
+    fn absenderauswahl_ignoriert_gross_und_kleinschreibung() {
+        let f = PlaybackFilter {
+            senders: vec!["Oma@Example.ORG".into()],
+            ..Default::default()
+        };
+        assert!(matches_filter(&mit_absender("a", "oma@example.org"), &f, HEUTE));
+        assert!(!matches_filter(&mit_absender("b", "opa@example.org"), &f, HEUTE));
+    }
+
+    #[test]
+    fn absenderauswahl_schliesst_bilder_ohne_absender_aus() {
+        // Bei einer Auswahl "von Oma" will niemand den Nextcloud-Ordner
+        // dazwischen haben.
+        let f = PlaybackFilter {
+            senders: vec!["oma@example.org".into()],
+            ..Default::default()
+        };
+        assert!(!matches_filter(&mit_datum("a", Some(im_jahr(2025))), &f, HEUTE));
+    }
+
+    #[test]
+    fn build_order_wendet_die_auswahl_an() {
+        let idx = index_of(vec![
+            mit_datum("alt", Some(im_jahr(1987))),
+            mit_datum("neu", Some(im_jahr(2026))),
+        ]);
+        let f = PlaybackFilter {
+            time: TimeFilter::Years(vec![1987]),
+            include_undated: false,
+            ..Default::default()
+        };
+        let o = build_order(
+            &idx,
+            &sources(&["s"]),
+            PlayOrder::FileName,
+            false,
+            &f,
+            HEUTE,
+            1,
+        );
+        assert_eq!(o, vec!["alt"]);
     }
 }

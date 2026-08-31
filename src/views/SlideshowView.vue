@@ -16,6 +16,9 @@ import { useConfigStore } from '@/stores/config'
 import { useSlideshowStore } from '@/stores/slideshow'
 import { createGestureRecognizer } from '@/composables/useGestures'
 import { usePixelShift } from '@/composables/usePixelShift'
+import * as api from '@/lib/api'
+import { EVENTS } from '@/lib/types'
+import { listen } from '@tauri-apps/api/event'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -60,6 +63,23 @@ const paused = computed(() => show.hasImages && !show.playing && active.value)
 const { transform: pausedShift } = usePixelShift(
   computed(() => cfg.value?.overlays.pixelShift ?? true),
 )
+
+/**
+ * Wie viele Fotos auf Freigabe warten (F4, E-31).
+ *
+ * Nur eine Zahl statt einer Liste: der Hinweis steht neben einem laufenden
+ * Bild und soll die Bruecke nicht belasten (R-03). Nachgezaehlt wird beim
+ * Start und nach jedem Sync — oefter waere Rechenzeit ohne Anlass (NF-06).
+ */
+const waiting = ref(0)
+
+const showWaiting = computed(
+  () => waiting.value > 0 && (cfg.value?.overlays.showQuarantineHint ?? true) && active.value,
+)
+
+async function countWaiting() {
+  waiting.value = await api.quarantineCount()
+}
 
 // ── Gesten (FA-41, FA-43) ────────────────────────────────────────────────────
 
@@ -120,14 +140,21 @@ async function excludeCurrent() {
   if (await show.excludeCurrent()) flash(t('slideshow.excluded'))
 }
 
+let unlistenSync: (() => void) | null = null
+
 onMounted(async () => {
   await show.start(
     () => cfg.value?.intervalSeconds ?? 30,
     () => active.value,
   )
+  void countWaiting()
+  // Nach jedem Sync neu zaehlen: dann und nur dann kann sich die Zahl
+  // aendern, ohne dass jemand am Rahmen etwas getan hat.
+  unlistenSync = await listen(EVENTS.sync, () => void countWaiting())
 })
 
 onBeforeUnmount(() => {
+  unlistenSync?.()
   show.dispose()
   if (toastTimer) clearTimeout(toastTimer)
 })
@@ -208,6 +235,18 @@ onBeforeUnmount(() => {
           {{ t('slideshow.paused') }}
         </div>
       </Transition>
+      <Transition name="fade">
+        <button
+          v-if="showWaiting"
+          class="waiting"
+          @pointerdown.stop
+          @pointerup.stop
+          @click.stop="router.push('/settings')"
+        >
+          {{ t('slideshow.waiting', { n: waiting }) }}
+        </button>
+      </Transition>
+
       <Transition name="fade">
         <div v-if="toast" class="toast">{{ toast }}</div>
       </Transition>
@@ -350,6 +389,26 @@ onBeforeUnmount(() => {
   /* Wie bei den übrigen Einblendungen: langsam genug, um nicht als Bewegung
      wahrgenommen zu werden (NF-07). */
   transition: transform 4s ease-in-out;
+}
+
+/* Wie das Pausen-Abzeichen in Messing: beides meldet einen Zustand, der eine
+   Handlung nahelegt. Anders als jenes ist der Hinweis anklickbar und fuehrt in
+   den Bild-Browser -- deshalb faengt er Zeigerereignisse ab, waehrend der
+   Stapel darueber sie durchlaesst. */
+.waiting {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 20px;
+  border: 1px solid var(--ss-border-strong);
+  border-radius: var(--ss-radius-pill);
+  background: rgba(10, 10, 10, 0.82);
+  color: var(--ss-accent);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  pointer-events: auto;
 }
 
 .toast {

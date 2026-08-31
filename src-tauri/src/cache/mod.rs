@@ -118,6 +118,146 @@ impl Cache {
         self.root.join("images").join(format!("{id}.jpg"))
     }
 
+    /// Traegt die Herkunft eines per Mail eingetroffenen Fotos nach (E-30).
+    ///
+    /// Getrennt von [`Self::store`], weil `store` sonst einen neunten
+    /// Parameter braeuchte, den drei von vier Quellenarten nie fuellen.
+    pub fn set_mail_meta(&mut self, id: &str, meta: crate::cache::index::MailMeta) -> bool {
+        match self.index.get_mut(id) {
+            Some(e) => {
+                e.mail = Some(meta);
+                self.dirty = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Gibt ein Foto aus der Quarantaene frei (F4).
+    pub fn release_quarantine(&mut self, id: &str) -> bool {
+        match self.index.get_mut(id).and_then(|e| e.mail.as_mut()) {
+            Some(m) if m.quarantined => {
+                m.quarantined = false;
+                self.dirty = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Ids der abgelegten Bilddateien (Wartung F10).
+    ///
+    /// Liest das Verzeichnis, nicht den Index — das ist ja der Sinn der
+    /// Pruefung: beide Seiten unabhaengig erheben und vergleichen.
+    pub fn image_ids_on_disk(&self) -> Vec<String> {
+        ids_in(&self.root.join("images"))
+    }
+
+    /// Ids der abgelegten Vorschaubilder (Wartung F10).
+    pub fn thumb_ids_on_disk(&self) -> Vec<String> {
+        ids_in(&self.root.join("thumbs"))
+    }
+
+    /// Groesse einer Bilddatei samt Vorschau, in Bytes (Wartung F9/F10).
+    pub fn file_bytes(&self, id: &str) -> u64 {
+        let bild = std::fs::metadata(self.image_path(id))
+            .map(|m| m.len())
+            .unwrap_or(0);
+        let vorschau = std::fs::metadata(self.thumb_path(id))
+            .map(|m| m.len())
+            .unwrap_or(0);
+        bild + vorschau
+    }
+
+    /// Loescht verwaiste Dateien und Eintraege ohne Datei (Wartung F10).
+    ///
+    /// Gibt zurueck, wie viele Bytes frei wurden. Die Auswahl trifft
+    /// [`crate::maintenance::check_database`]; hier wird nur ausgefuehrt —
+    /// damit die Entscheidung, was verwaist ist, ohne Dateisystem pruefbar
+    /// bleibt.
+    pub fn repair(&mut self, check: &crate::maintenance::DatabaseCheck) -> u64 {
+        let mut frei = 0u64;
+
+        for id in &check.orphan_files {
+            frei += std::fs::metadata(self.image_path(id))
+                .map(|m| m.len())
+                .unwrap_or(0);
+            let _ = std::fs::remove_file(self.image_path(id));
+        }
+        for id in &check.orphan_thumbs {
+            frei += std::fs::metadata(self.thumb_path(id))
+                .map(|m| m.len())
+                .unwrap_or(0);
+            let _ = std::fs::remove_file(self.thumb_path(id));
+        }
+
+        // Eintraege ohne Datei koennen nichts freigeben, muessen aber weg:
+        // die Diashow zoege sie sonst und zeigte nichts.
+        for id in &check.missing_files {
+            if self.index.remove(id).is_some() {
+                self.dirty = true;
+            }
+        }
+
+        frei
+    }
+
+    /// Setzt Anzeigezeitpunkt und -zaehler zurueck (Wartung F3).
+    ///
+    /// Reicht an den Index weiter und merkt sich, dass geschrieben werden
+    /// muss — sonst ginge das Zuruecksetzen beim naechsten Neustart verloren.
+    pub fn reset_history(&mut self, ids: &[String]) -> usize {
+        let n = self.index.reset_history(ids);
+        if n > 0 {
+            self.dirty = true;
+        }
+        n
+    }
+
+    /// Schickt alle Fotos eines Absenders zurueck in die Quarantaene (F4).
+    ///
+    /// Gegenstueck zum Entfernen aus der Freigabeliste: wer nicht mehr
+    /// vertraut wird, dessen Bilder sollen auf Wunsch wieder warten. Der
+    /// Vergleich ignoriert Gross- und Kleinschreibung, wie `is_allowed`.
+    ///
+    /// Gibt zurueck, wie viele Eintraege sich geaendert haben.
+    pub fn quarantine_sender(&mut self, source_id: &str, sender: &str) -> usize {
+        let wanted = sender.trim().to_lowercase();
+        let mut n = 0;
+        for entry in self.index.values_mut() {
+            if entry.source_id != source_id {
+                continue;
+            }
+            let Some(m) = entry.mail.as_mut() else { continue };
+            if m.quarantined || m.sender.trim().to_lowercase() != wanted {
+                continue;
+            }
+            m.quarantined = true;
+            n += 1;
+        }
+        if n > 0 {
+            self.dirty = true;
+        }
+        n
+    }
+
+    /// Wie viele Fotos dieses Absenders liegen im Cache? (F4)
+    ///
+    /// Grundlage der Rueckfrage beim Entfernen — ohne die Zahl waere „Fotos
+    /// zurueck in die Quarantaene?" eine Frage ins Blaue.
+    pub fn sender_photo_count(&self, source_id: &str, sender: &str) -> usize {
+        let wanted = sender.trim().to_lowercase();
+        self.index
+            .values()
+            .filter(|e| e.source_id == source_id)
+            .filter(|e| {
+                e.mail
+                    .as_ref()
+                    .is_some_and(|m| m.sender.trim().to_lowercase() == wanted)
+            })
+            .count()
+    }
+
     /// Pfad des Vorschaubilds zu einer Id (E-25). Wie [`Self::image_path`]
     /// ausschließlich hier gebildet.
     pub fn thumb_path(&self, id: &str) -> PathBuf {
@@ -202,6 +342,9 @@ impl Cache {
         let last_shown = self.index.get(&id).and_then(|e| e.last_shown);
         let excluded = self.index.get(&id).map(|e| e.excluded).unwrap_or(false);
         let show_count = self.index.get(&id).map(|e| e.show_count).unwrap_or(0);
+        // Herkunft ueberlebt ein Update: dieselbe Mail, dasselbe Foto in
+        // neuer Fassung -- Absender und Quarantaenestand bleiben gueltig.
+        let mail = self.index.get(&id).and_then(|e| e.mail.clone());
 
         let entry = CacheEntry {
             id,
@@ -219,6 +362,7 @@ impl Cache {
             last_shown,
             show_count,
             excluded,
+            mail,
             // Das alte Vorschaubild passt nicht mehr zum neuen Inhalt.
             thumb_bytes: None,
         };
@@ -707,4 +851,154 @@ mod tests {
         assert_eq!(s.max_bytes, 1000);
         assert_eq!(s.excluded, 1);
     }
+}
+
+#[cfg(test)]
+mod sender_tests {
+    use super::*;
+    use crate::cache::index::MailMeta;
+
+    struct TempDir(PathBuf);
+    impl TempDir {
+        fn new(name: &str) -> Self {
+            let mut p = std::env::temp_dir();
+            p.push(format!("slowshow-abs-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&p);
+            std::fs::create_dir_all(&p).unwrap();
+            Self(p)
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Legt ein Foto an und haengt Absenderangaben daran.
+    fn mail_photo(cache: &mut Cache, source: &str, name: &str, sender: &str, quarantined: bool) {
+        let entry = cache
+            .store(
+                source,
+                name,
+                name,
+                Prepared {
+                    bytes: vec![0xAB; 32],
+                    width: 100,
+                    height: 100,
+                    taken_at: Some(1700),
+                },
+                None,
+                None,
+                None,
+                1700,
+            )
+            .unwrap();
+        cache.set_mail_meta(
+            &entry.id,
+            MailMeta {
+                sender: sender.into(),
+                subject: "Testbetreff".into(),
+                message_id: name.into(),
+                quarantined,
+            },
+        );
+    }
+
+    fn befuellt(dir: &TempDir) -> Cache {
+        let mut cache = Cache::open(&dir.0).unwrap();
+        mail_photo(&mut cache, "post", "a.jpg", "Oma@Example.ORG", false);
+        mail_photo(&mut cache, "post", "b.jpg", "oma@example.org", false);
+        mail_photo(&mut cache, "post", "c.jpg", "opa@example.org", false);
+        // Gleiche Adresse, andere Quelle: darf nicht mitgenommen werden.
+        mail_photo(&mut cache, "zweitpost", "d.jpg", "oma@example.org", false);
+        cache
+    }
+
+    #[test]
+    fn zaehlt_die_fotos_eines_absenders_je_quelle() {
+        let dir = TempDir::new("zaehlen");
+        let cache = befuellt(&dir);
+
+        // Gross- und Kleinschreibung darf nicht trennen -- sonst zeigte die
+        // Rueckfrage beim Entfernen eine zu kleine Zahl an.
+        assert_eq!(cache.sender_photo_count("post", "oma@example.org"), 2);
+        assert_eq!(cache.sender_photo_count("post", "OMA@EXAMPLE.ORG"), 2);
+        assert_eq!(cache.sender_photo_count("post", "opa@example.org"), 1);
+        assert_eq!(cache.sender_photo_count("post", "fremd@example.org"), 0);
+        assert_eq!(
+            cache.sender_photo_count("zweitpost", "oma@example.org"),
+            1,
+            "Quellen werden getrennt gezaehlt"
+        );
+    }
+
+    #[test]
+    fn schickt_nur_die_fotos_des_absenders_zurueck() {
+        let dir = TempDir::new("zurueck");
+        let mut cache = befuellt(&dir);
+
+        let n = cache.quarantine_sender("post", "OMA@Example.org");
+        assert_eq!(n, 2, "beide Fotos der Oma aus dieser Quelle");
+
+        let quarantaene: Vec<&str> = cache
+            .index()
+            .values()
+            .filter(|e| e.is_quarantined())
+            .map(|e| e.file_name.as_str())
+            .collect();
+        assert_eq!(quarantaene.len(), 2);
+        assert!(quarantaene.contains(&"a.jpg") && quarantaene.contains(&"b.jpg"));
+
+        // Der Opa und die zweite Quelle bleiben unberuehrt. Ohne diese Probe
+        // faende ein zu weit gefasster Filter niemanden auf.
+        assert_eq!(cache.sender_photo_count("post", "opa@example.org"), 1);
+        assert!(cache
+            .index()
+            .values()
+            .filter(|e| e.source_id == "zweitpost")
+            .all(|e| !e.is_quarantined()));
+    }
+
+    #[test]
+    fn zaehlt_bereits_wartende_nicht_noch_einmal() {
+        // Zweimal hintereinander entfernen darf beim zweiten Mal 0 melden --
+        // sonst behauptete die Oberflaeche, sie haette wieder etwas bewegt.
+        let dir = TempDir::new("doppelt");
+        let mut cache = befuellt(&dir);
+
+        assert_eq!(cache.quarantine_sender("post", "oma@example.org"), 2);
+        assert_eq!(cache.quarantine_sender("post", "oma@example.org"), 0);
+    }
+
+    #[test]
+    fn unbekannter_absender_aendert_nichts() {
+        let dir = TempDir::new("unbekannt");
+        let mut cache = befuellt(&dir);
+
+        assert_eq!(cache.quarantine_sender("post", "niemand@example.org"), 0);
+        assert!(cache.index().values().all(|e| !e.is_quarantined()));
+    }
+}
+
+/// Dateinamen eines Verzeichnisses ohne Endung — die Cache-Ids (Wartung F10).
+///
+/// Ein nicht lesbares Verzeichnis liefert eine leere Liste: die Pruefung
+/// meldete dann „nichts verwaist" statt abzubrechen. Das ist die harmlosere
+/// Auskunft — sie fuehrt zu keiner Loeschung.
+fn ids_in(dir: &Path) -> Vec<String> {
+    let Ok(eintraege) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    eintraege
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let pfad = e.path();
+            if pfad.extension().and_then(|x| x.to_str()) != Some("jpg") {
+                return None;
+            }
+            pfad.file_stem()
+                .and_then(|x| x.to_str())
+                .map(|x| x.to_string())
+        })
+        .collect()
 }

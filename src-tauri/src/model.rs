@@ -37,6 +37,62 @@ pub enum PlayOrder {
     Chronological,
 }
 
+/// Zeitraum der Diashow-Auswahl (Erweiterungspapier F5).
+///
+/// Ein Typ statt Schnellauswahl *und* Jahresliste nebeneinander: beides sind
+/// Zeitangaben, und zwei Felder liessen den Zustand „letzte 12 Monate *und*
+/// nur 1987" zu, den niemand erklären kann.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", tag = "type", content = "years")]
+pub enum TimeFilter {
+    #[default]
+    All,
+    /// Rollendes Fenster ab jetzt.
+    Last12Months,
+    /// Das laufende Kalenderjahr.
+    ThisYear,
+    /// Ausdrücklich gewählte Jahre (Mehrfachauswahl).
+    Years(Vec<i32>),
+}
+
+/// Welche Bilder überhaupt in die Diashow kommen (F5).
+///
+/// Wirkt vor der Reihenfolge: erst wird ausgewählt, dann gemischt oder
+/// sortiert. Deshalb sitzt der Filter in `build_order` und nicht im Planer —
+/// sonst müsste jeder Modus ihn erneut anwenden.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackFilter {
+    #[serde(default)]
+    pub time: TimeFilter,
+    /// Nur diese Absender. Leer = alle (auch Bilder ohne Absender).
+    #[serde(default)]
+    pub senders: Vec<String>,
+    /// Bilder ohne Aufnahmedatum mitzeigen.
+    ///
+    /// Getrennt schaltbar, weil sie sonst bei jeder Jahresauswahl still
+    /// verschwänden — bei gescannten Altfotos ohne Betreffjahr wäre das der
+    /// halbe Bestand.
+    #[serde(default = "default_true")]
+    pub include_undated: bool,
+}
+
+/// Von Hand statt abgeleitet.
+///
+/// `#[serde(default = "default_true")]` gilt nur beim Deserialisieren. Ein
+/// abgeleitetes `Default` setzte `include_undated` auf `false` — und damit
+/// verschwänden bei einer frischen Konfiguration alle Bilder ohne
+/// Aufnahmedatum aus der Diashow. Genau das haben die Playlist-Tests gemeldet.
+impl Default for PlaybackFilter {
+    fn default() -> Self {
+        Self {
+            time: TimeFilter::default(),
+            senders: Vec::new(),
+            include_undated: true,
+        }
+    }
+}
+
 /// Feineinstellungen der Wiedergabe (E-29).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -138,6 +194,13 @@ pub struct OverlayConfig {
     /// Durchgestrichenes Auge — Bild aus der Diashow nehmen (FA-30).
     #[serde(default = "default_true")]
     pub show_exclude_button: bool,
+    /// Hinweis, wenn Fotos auf Freigabe warten (F4, E-31).
+    ///
+    /// Abschaltbar, weil eine dauerhafte Einblendung der Ruhe des Entwurfs
+    /// widerspricht (E-13). Wer den Rahmen puristisch will, sieht die
+    /// wartenden Fotos nur im Bild-Browser.
+    #[serde(default = "default_true")]
+    pub show_quarantine_hint: bool,
     /// Ziffern oder Zeiger für die Uhr über dem Foto (E-20).
     #[serde(default)]
     pub clock_style: ClockStyle,
@@ -153,6 +216,7 @@ impl Default for OverlayConfig {
             pixel_shift: true,
             show_settings_button: true,
             show_exclude_button: true,
+            show_quarantine_hint: true,
             clock_style: ClockStyle::Digital,
         }
     }
@@ -345,6 +409,9 @@ pub struct AppConfig {
     /// Feineinstellungen der Wiedergabe (E-29).
     #[serde(default)]
     pub playback: PlaybackConfig,
+    /// Auswahl, welche Bilder laufen (F5).
+    #[serde(default)]
+    pub filter: PlaybackFilter,
     /// Oberflächensprache: "auto" | "de" | "en" (NF-09).
     #[serde(default = "default_language")]
     pub language: String,
@@ -382,6 +449,7 @@ impl Default for AppConfig {
             protect_settings: true,
             orientation: Orientation::default(),
             playback: PlaybackConfig::default(),
+            filter: PlaybackFilter::default(),
             language: default_language(),
             sources: Vec::new(),
         }
@@ -471,6 +539,102 @@ pub enum SourceKind {
         #[serde(default)]
         allow_insecure_tls: bool,
     },
+    /// Postfach, aus dem Fotos per Mail eintreffen (E-30).
+    ///
+    /// Als vierte Quellenart und nicht als zweiter Bestand (E-28): damit
+    /// greifen Ringpuffer, Bild-Browser, Filter und Diashow ohne Änderung, und
+    /// „Quelle deaktivieren" bedeutet auch hier das Erwartete.
+    ///
+    /// Ein Postfach je Rahmen — die Oberfläche lässt kein zweites zu.
+    #[serde(rename_all = "camelCase")]
+    Mail {
+        host: String,
+        #[serde(default = "default_imap_port")]
+        port: u16,
+        username: String,
+        /// Schlüssel in den verschlüsselt abgelegten Zugangsdaten (NF-05).
+        password_ref: String,
+        #[serde(default = "default_mail_folder")]
+        folder: String,
+        /// Absender, deren Fotos direkt in die Diashow gehen (F4).
+        ///
+        /// Wer nicht darin steht, landet in Quarantäne. Die Liste wächst durch
+        /// Freigeben am Rahmen — beim ersten Foto einer Person einmal tippen.
+        #[serde(default)]
+        allowed_senders: Vec<String>,
+        /// Auch bekannte Absender erst in Quarantäne legen (F4, optional).
+        #[serde(default)]
+        quarantine_all: bool,
+        /// Obergrenze je Anhang in Bytes (Papier 1.3).
+        #[serde(default = "default_max_attachment")]
+        max_attachment_bytes: u64,
+        /// Wie viele Mails je Stunde höchstens verarbeitet werden (F4).
+        #[serde(default = "default_max_mails_per_hour")]
+        max_mails_per_hour: u32,
+        /// Ablagequalität (E-30).
+        #[serde(default)]
+        quality: MailQuality,
+        /// Auch bereits gelesene Nachrichten holen (E-34).
+        ///
+        /// Voreinstellung `false`, also der bisherige Betrieb: nur Ungelesenes.
+        /// Eingeschaltet sieht der Abruf den ganzen Ordner durch — nötig, wenn
+        /// zwei Rahmen an demselben Postfach hängen, denn der erste markiert
+        /// jede Mail als gelesen und nähme sie dem zweiten sonst weg.
+        ///
+        /// `#[serde(default)]`, damit vorhandene Konfigurationen ohne dieses
+        /// Feld weiter lesbar bleiben (NF-10).
+        #[serde(default)]
+        include_seen: bool,
+    },
+}
+
+/// Ablagequalität für Mail-Fotos (E-30).
+///
+/// Drei JPEG-Stufen statt der Stufe „Sparsam (WebP)" aus dem Papier: der
+/// WebP-Encoder des `image`-Crates kann ausschließlich verlustfrei, und
+/// verlustfreies WebP eines Fotos ist *größer* als ein JPEG mit Qualität 85 —
+/// „Sparsam" wäre also die verschwenderischste Stufe gewesen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum MailQuality {
+    /// Kleinere Zielgröße und stärkere Kompression.
+    Frugal,
+    #[default]
+    Standard,
+    /// Volle Zielgröße, schwache Kompression.
+    Original,
+}
+
+impl MailQuality {
+    /// Zielmaße und JPEG-Qualität für die Cache-Ablage (NF-12).
+    ///
+    /// `base` ist die Zielgröße aus der Cache-Konfiguration; die Stufen
+    /// skalieren relativ dazu, damit ein anderes Display nicht drei feste
+    /// Werte falsch macht.
+    pub fn targets(self, base_w: u32, base_h: u32) -> (u32, u32, u8) {
+        match self {
+            MailQuality::Frugal => (base_w * 3 / 4, base_h * 3 / 4, 70),
+            MailQuality::Standard => (base_w, base_h, 85),
+            MailQuality::Original => (base_w, base_h, 95),
+        }
+    }
+}
+
+fn default_imap_port() -> u16 {
+    993
+}
+
+fn default_mail_folder() -> String {
+    "INBOX".into()
+}
+
+/// 25 MB — die Vorgabe aus dem Papier.
+fn default_max_attachment() -> u64 {
+    25 * 1024 * 1024
+}
+
+fn default_max_mails_per_hour() -> u32 {
+    30
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -19,23 +19,11 @@
          einen Sync zu starten — die Diashow läuft dann aus dem Cache (FA-26). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- R-04: Hersteller-Batterieoptimierungen beenden langlaufende Apps.
-         Die App fragt die Ausnahme aktiv an; ohne dieses Recht ist der Dialog
-         nicht aufrufbar. Google verlangt für dieses Recht eine Begründung im
-         Store-Eintrag — sie steht in docs/store-listing.md. -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
-    <!-- Vordergrunddienst für den Dauerbetrieb (NF-01, E-24). Ohne ihn stuft
-         Android die App bei Speicherdruck als entbehrlich ein — der häufigste
-         Grund, warum ein Rahmen morgens schwarz ist. -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-
-    <!-- Ab Android 13 nötig, damit die Dienst-Benachrichtigung sichtbar wird.
-         Die App fragt das Recht bewusst **nicht** ab: fehlt es, läuft der
-         Dienst unverändert weiter und die Benachrichtigung bleibt verborgen —
-         auf einem Bilderrahmen ist das das bessere Ergebnis. -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Bewusst **kein** Vordergrunddienst mehr (E-38). Der Rahmen laeuft mit
+         sichtbarer Activity; eine App in diesem Zustand raeumt Android nicht
+         wegen Speicherdrucks ab. Damit entfallen FOREGROUND_SERVICE,
+         FOREGROUND_SERVICE_SPECIAL_USE und POST_NOTIFICATIONS — und mit
+         `specialUse` die einzelne Google-Pruefung. -->
 
     <!-- Kein WRITE_EXTERNAL_STORAGE und kein READ_MEDIA_IMAGES:
          der Zugriff auf lokale Ordner läuft ausschließlich über das Storage
@@ -80,21 +68,5 @@
          Heimnetz-Steuerung ihn wecken kann (FA-55). -->
     <attribute name="android:turnScreenOn" value="true" />
   </activity-attributes>
-
-  <services>
-    <!-- Typ `specialUse`, weil keiner der vorgegebenen Typen zutrifft: ein
-         Bilderrahmen spielt keine Medien ab, ortet nicht und misst nichts.
-         Eine Falschangabe (etwa `mediaPlayback`) fliegt bei der Play-Prüfung
-         auf; `specialUse` ist der dafür vorgesehene Weg und verlangt die
-         Begründung unten sowie einen Absatz im Store-Eintrag (RB-03). -->
-    <service
-      android:name=".SlowshowService"
-      android:exported="false"
-      android:foregroundServiceType="specialUse">
-      <property
-        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-        android:value="Digitaler Bilderrahmen im Dauerbetrieb: die Diashow laeuft ueber Tage ohne Nutzerinteraktion weiter und darf dabei nicht vom System beendet werden." />
-    </service>
-  </services>
 
 </manifest-additions>

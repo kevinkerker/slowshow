@@ -45,13 +45,20 @@ pub struct Prepared {
 
 // ── Formaterkennung ──────────────────────────────────────────────────────────
 
-/// Dateiendungen, die als Bildquelle in Frage kommen (FA-04).
-const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp"];
+/// Dateiendungen, die als Bildquelle in Frage kommen (FA-04, E-37).
+///
+/// `tif`/`tiff` kommen von Scannern, `bmp` aus Windows-Werkzeugen, `ico`
+/// praktisch nie — alle drei kostet nur je ein Feature der Bibliothek, weil
+/// sie in reinem Rust vorliegen. `gif` liefert das **erste Einzelbild**; die
+/// Bewegung bleibt draussen (E-07), das Standbild ist aber besser als nichts.
+const IMAGE_EXTENSIONS: &[&str] = &[
+    "jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff", "ico", "gif",
+];
 
 /// Endungen, die stillschweigend übersprungen werden.
 /// Videos sind per E-07 kein Projektbestandteil, HEIC per E-04.
 const SKIP_EXTENSIONS: &[&str] = &[
-    "heic", "heif", "avif", "mp4", "mov", "avi", "mkv", "webm", "m4v", "3gp", "gif",
+    "heic", "heif", "avif", "mp4", "mov", "avi", "mkv", "webm", "m4v", "3gp",
 ];
 
 /// Klassifikation einer Datei allein anhand ihres Namens.
@@ -496,5 +503,107 @@ mod tests {
     fn prepare_meldet_fehler_statt_zu_paniken_bei_muell() {
         let err = prepare(b"das ist kein bild", 800, 600, 85, 0, 0).unwrap_err();
         assert!(matches!(err, DecodeError::Decode(_)));
+    }
+
+    // ── Formate ab E-37 ──────────────────────────────────────────────────────
+
+    /// Kleines Bild mit erkennbarem Inhalt, in einem beliebigen Format.
+    ///
+    /// Durchgehend RGBA: der ICO-Encoder der Bibliothek legt intern ein PNG
+    /// ab, und ihr ICO-Decoder besteht auf RGBA — mit RGB scheitert schon der
+    /// eigene Hin- und Rueckweg. Echte ICO-Dateien tragen ueberwiegend BMP
+    /// oder eben RGBA-PNG, hier geht es nur um brauchbare Testdaten.
+    fn kodiere(format: image::ImageFormat, w: u32, h: u32) -> Vec<u8> {
+        use image::{Rgba, RgbaImage};
+        let mut img = RgbaImage::new(w, h);
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            *p = Rgba([(x % 256) as u8, (y % 256) as u8, 200, 255]);
+        }
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut bytes, format)
+            .expect("kodierbar");
+        bytes.into_inner()
+    }
+
+    #[test]
+    fn nimmt_bmp_tiff_und_ico_an() {
+        // Die Endungen allein zu pruefen genuegte nicht: aktiviert werden die
+        // Formate in `Cargo.toml`, und ein vergessenes Feature faellt erst
+        // beim Dekodieren auf — dann aber am Geraet.
+        for (format, name) in [
+            (image::ImageFormat::Bmp, "bmp"),
+            (image::ImageFormat::Tiff, "tif"),
+            (image::ImageFormat::Ico, "ico"),
+        ] {
+            // ICO kann hoechstens 256 Kantenlaenge.
+            let bytes = kodiere(format, 200, 150);
+            let p = prepare(&bytes, 800, 800, 85, 0, 0)
+                .unwrap_or_else(|e| panic!("{name} muss dekodierbar sein: {e}"));
+            assert_eq!((p.width, p.height), (200, 150), "{name}");
+            assert!(!p.bytes.is_empty(), "{name}");
+        }
+    }
+
+    #[test]
+    fn nimmt_das_erste_einzelbild_eines_gif() {
+        // Der eigentliche Punkt von E-37: bewegte GIFs bleiben draussen
+        // (E-07), ihr erstes Einzelbild ist aber ein Bild wie jedes andere.
+        use image::codecs::gif::GifEncoder;
+        use image::{Delay, Frame, Rgba, RgbaImage};
+
+        let mut bytes = Vec::new();
+        {
+            let mut enc = GifEncoder::new(&mut bytes);
+            let mut rahmen = Vec::new();
+            for farbe in [Rgba([255, 0, 0, 255]), Rgba([0, 255, 0, 255])] {
+                let mut bild = RgbaImage::new(60, 40);
+                for p in bild.pixels_mut() {
+                    *p = farbe;
+                }
+                rahmen.push(Frame::from_parts(
+                    bild,
+                    0,
+                    0,
+                    Delay::from_numer_denom_ms(100, 1),
+                ));
+            }
+            enc.encode_frames(rahmen).expect("GIF kodierbar");
+        }
+
+        let p = prepare(&bytes, 800, 800, 85, 0, 0).expect("GIF muss dekodierbar sein");
+        assert_eq!((p.width, p.height), (60, 40));
+
+        // Rot ist das erste Einzelbild. Kaeme Gruen an, laege die Bewegung
+        // vor dem Standbild -- und die Diashow zeigte etwas anderes als die
+        // Vorschau im Mailprogramm.
+        let zurueck = image::load_from_memory(&p.bytes).expect("Ausgabe lesbar").to_rgb8();
+        let mitte = zurueck.get_pixel(30, 20);
+        assert!(
+            mitte[0] > 150 && mitte[1] < 100,
+            "erstes Einzelbild ist rot, kam an: {mitte:?}"
+        );
+    }
+
+    #[test]
+    fn ordnet_die_neuen_endungen_als_bild_ein() {
+        for name in [
+            "urlaub.bmp",
+            "scan.tif",
+            "scan.TIFF",
+            "logo.ico",
+            "katze.gif",
+        ] {
+            assert_eq!(classify(name), FileClass::Image, "{name}");
+        }
+    }
+
+    #[test]
+    fn haelt_die_gesperrten_formate_weiter_draussen() {
+        // Gegenprobe zu E-37: GIF ist herausgenommen worden, E-04 und E-07
+        // gelten unveraendert.
+        for name in ["oma.heic", "urlaub.HEIF", "clip.mp4", "clip.mov", "foto.avif"] {
+            assert_eq!(classify(name), FileClass::Skipped, "{name}");
+        }
     }
 }

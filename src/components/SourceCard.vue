@@ -56,16 +56,19 @@ const status = computed(() => {
   const kind = props.source.kind
 
   if (kind.type === 'local') {
-    parts.push(t('sources.photos', { n: props.photoCount }))
+    parts.push(t('sources.photos', { n: props.photoCount }, props.photoCount))
     parts.push(t('sources.localFolder'))
+  } else if (kind.type === 'mail') {
+    // Eigener Zweig: vorher fiel das Postfach in den Sonst-Zweig und gab sich
+    // am Geraet als „NAS · WebDAV" aus. Die Bezeichnung der Quellenart steht
+    // zuerst, dahinter die Angaben, die im Betrieb zaehlen.
+    parts.push(t('sources.mailbox'))
+    parts.push(t('sources.photosCached', { n: props.photoCount }, props.photoCount))
+    parts.push(syncedText())
   } else {
     parts.push(kind.type === 'nextcloud' ? t('sources.nextcloud') : t('sources.nas'))
-    parts.push(
-      t('sources.lastSync', {
-        when: formatRelativeTime(props.source.lastSync, new Date(), t),
-      }),
-    )
-    parts.push(t('sources.photosCached', { n: props.photoCount }))
+    parts.push(syncedText())
+    parts.push(t('sources.photosCached', { n: props.photoCount }, props.photoCount))
     if (kind.type === 'nextcloud' && kind.usePreviewApi) {
       parts.push(t('sources.previewActive'))
     }
@@ -74,6 +77,21 @@ const status = computed(() => {
   if (!props.source.enabled) parts.push(t('sources.excludedFromShow'))
   return parts.join(' · ')
 })
+
+/**
+ * Stand des letzten Abrufs als fertiger Satzteil.
+ *
+ * Ohne Zeitstempel steht dort „noch nie synchronisiert" — ein vollstaendiger
+ * Ausdruck, der sich nicht noch einmal in „zuletzt synchronisiert {when}"
+ * stecken laesst. Genau das tat die Karte vorher und schrieb „zuletzt
+ * synchronisiert noch nie synchronisiert".
+ */
+function syncedText(): string {
+  if (props.source.lastSync == null) return t('sources.neverSynced')
+  return t('sources.lastSync', {
+    when: formatRelativeTime(props.source.lastSync, new Date(), t),
+  })
+}
 
 /** Lange Pfade auf das Wesentliche kuerzen — die Zeile ist einzeilig. */
 function shortPath(path: string): string {
@@ -96,6 +114,10 @@ const iconPath = computed(() => {
     // Wolke
     case 'nextcloud':
       return 'M7 18 A4 4 0 0 1 7 10 A5.5 5.5 0 0 1 17.5 11.5 A3.5 3.5 0 0 1 17 18 Z'
+    // Briefumschlag. Ohne diesen Fall blieb beim Postfach ein leeres
+    // Symbolfeld stehen — am Geraet als dunkles Quadrat zu sehen.
+    case 'mail':
+      return 'M3 7 A2 2 0 0 1 5 5 L19 5 A2 2 0 0 1 21 7 L21 17 A2 2 0 0 1 19 19 L5 19 A2 2 0 0 1 3 17 Z M3.6 6.4 L12 13 L20.4 6.4'
     default:
       return ''
   }

@@ -2,16 +2,19 @@
 /**
  * Anlegen und Bearbeiten einer Quelle (FA-20, FA-21, FA-23, FA-29).
  *
- * Drei Quellenarten in einem Formular. Der Verbindungstest vor dem Speichern
- * ist bewusst prominent: eine Quelle, die erst beim nächtlichen Sync scheitert,
- * fällt auf einem unbeaufsichtigten Gerät niemandem auf.
+ * Vier Quellenarten in einem Formular (E-30). Der Verbindungstest vor dem
+ * Speichern ist bewusst prominent: eine Quelle, die erst beim nächtlichen Sync
+ * scheitert, fällt auf einem unbeaufsichtigten Gerät niemandem auf. Beim
+ * Postfach zählt das doppelt — dort merkt man einen Tippfehler sonst erst,
+ * wenn die Fotos der Großeltern ausbleiben.
  */
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ToggleSwitch from './ToggleSwitch.vue'
 import SettingRow from './SettingRow.vue'
 import * as api from '@/lib/api'
-import type { Album, Source, SourceKind } from '@/lib/types'
+import { formatRelativeTime } from '@/lib/format'
+import type { Album, FetchLogEntry, ResyncProgress, Source, SourceKind } from '@/lib/types'
 
 const props = defineProps<{
   /** `null` legt eine neue Quelle an. */
@@ -45,6 +48,152 @@ const minWidth = ref(0)
 const minHeight = ref(0)
 const syncIntervalMinutes = ref(360)
 
+// ── Postfach (E-30) ──────────────────────────────────────────────────────────
+const mailHost = ref('')
+const mailPort = ref(993)
+const mailFolder = ref('INBOX')
+const quarantineAll = ref(false)
+const maxAttachmentMb = ref(25)
+const maxMailsPerHour = ref(30)
+const includeSeen = ref(false)
+
+// ── Abruf: Stand und Protokoll (Wartung F5–F7) ───────────────────────────────
+// Beim Postfach beantwortet die Statuszeile die Frage, die vor dem Rahmen
+// wirklich aufkommt: „kommt da noch was an?". Vorher liess sich „der Abruf
+// laeuft nicht" nicht von „es wurde nichts geschickt" unterscheiden.
+const lastFetch = ref<FetchLogEntry | null>(null)
+const fetchEntries = ref<FetchLogEntry[]>([])
+const fetching = ref(false)
+const showLog = ref(false)
+
+async function loadFetchState() {
+  if (!props.source || props.source.kind.type !== 'mail') return
+  try {
+    const id = props.source.id
+    lastFetch.value = await api.lastFetch(id)
+    fetchEntries.value = (await api.fetchLog()).filter((e) => e.sourceId === id)
+  } catch (e) {
+    console.warn('Abrufstand nicht ladbar', e)
+  }
+}
+
+/** Statuszeile in einem Satz (F5). */
+const fetchStatus = computed(() => {
+  const e = lastFetch.value
+  if (!e) return t('sourceForm.fetchNever')
+  const when = formatRelativeTime(e.at, new Date(), t)
+  if (e.error) return t('sourceForm.fetchFailed', { when, error: e.error })
+  if (e.added > 0) return t('sourceForm.fetchOk', { when, n: e.added })
+  return t('sourceForm.fetchNothing', { when })
+})
+
+/** Manueller Abruf (F7). */
+async function fetchNow() {
+  if (!props.source) return
+  fetching.value = true
+  try {
+    await api.syncNow(props.source.id)
+    await loadFetchState()
+  } catch (e) {
+    formError.value = message(e)
+  } finally {
+    fetching.value = false
+  }
+}
+
+// ── Neuabgleich (Wartung F8) ─────────────────────────────────────────────────
+const resyncing = ref(false)
+const resyncProgress = ref<ResyncProgress | null>(null)
+let stopResyncListener: (() => void) | null = null
+
+async function startResync() {
+  if (!props.source) return
+  if (!confirm(t('sourceForm.resyncAsk'))) return
+
+  resyncing.value = true
+  resyncProgress.value = null
+  // Der Fortschritt kommt als Ereignis: der Aufruf selbst laeuft Minuten und
+  // koennte sonst nur „fertig" oder „kaputt" melden.
+  stopResyncListener = await api.onResyncProgress((p) => (resyncProgress.value = p))
+  try {
+    const n = await api.resyncMailbox(props.source.id)
+    testResult.value = { ok: true, message: t('sourceForm.resyncDone', { n }) }
+    await loadFetchState()
+  } catch (e) {
+    formError.value = message(e)
+  } finally {
+    resyncing.value = false
+    resyncProgress.value = null
+    stopResyncListener?.()
+    stopResyncListener = null
+  }
+}
+
+async function stopResync() {
+  await api.cancelResync()
+}
+
+function triggerLabel(e: FetchLogEntry): string {
+  if (e.trigger === 'manual') return t('sourceForm.triggerManual')
+  if (e.trigger === 'resync') return t('sourceForm.triggerResync')
+  return t('sourceForm.triggerInterval')
+}
+
+function logTime(e: FetchLogEntry): string {
+  return formatRelativeTime(e.at, new Date(), t)
+}
+
+// ── Freigegebene Absender (F4, E-32) ─────────────────────────────────────────
+// Nur beim Bearbeiten geladen: eine neue Quelle hat noch keine Liste, und der
+// Aufruf braucht eine Quellen-Id, die es dann noch nicht gibt.
+const senders = ref<api.AllowedSender[]>([])
+const senderBusy = ref('')
+
+async function loadSenders() {
+  senders.value = []
+  if (!props.source || props.source.kind.type !== 'mail') return
+  try {
+    senders.value = await api.allowedSenders(props.source.id)
+  } catch (e) {
+    // Kein Formularfehler: die Liste ist eine Beigabe, ihr Fehlen darf das
+    // Bearbeiten der Quelle nicht blockieren.
+    console.warn('Freigegebene Absender nicht ladbar', e)
+  }
+}
+
+async function removeSender(entry: api.AllowedSender) {
+  if (!props.source) return
+
+  // Die Rueckfrage entscheidet ueber die vorhandenen Fotos (E-32). Bei einem
+  // Absender ohne Fotos gibt es nichts zu entscheiden -- dann nur bestaetigen.
+  let requarantine = false
+  if (entry.photoCount === 0) {
+    if (!confirm(t('sourceForm.removeSenderAskEmpty', { sender: entry.address }))) return
+  } else {
+    requarantine = confirm(
+      t('sourceForm.removeSenderAsk', { sender: entry.address, n: entry.photoCount }),
+    )
+  }
+
+  senderBusy.value = entry.address
+  try {
+    const moved = await api.removeAllowedSender(props.source.id, entry.address, requarantine)
+    senders.value = senders.value.filter((s) => s.address !== entry.address)
+    formError.value = ''
+    testResult.value = {
+      ok: true,
+      message:
+        moved > 0
+          ? t('sourceForm.senderRemovedWith', { n: moved })
+          : t('sourceForm.senderRemoved'),
+    }
+  } catch (e) {
+    formError.value = message(e)
+  } finally {
+    senderBusy.value = ''
+  }
+}
+
 const albums = ref<Album[]>([])
 const loadingAlbums = ref(false)
 const testing = ref(false)
@@ -53,7 +202,10 @@ const formError = ref('')
 const safAvailable = ref(true)
 
 const isEdit = computed(() => props.source !== null)
-const isRemote = computed(() => kind.value !== 'local')
+const isRemote = computed(() => kind.value !== 'local' && kind.value !== 'mail')
+
+/** Auswahl der Quellenart. Die Beschriftungen folgen dem Schlüsselmuster. */
+const KINDS: Kind[] = ['local', 'webDav', 'nextcloud', 'mail']
 
 /** Formular aus der übergebenen Quelle füllen — oder auf Standardwerte setzen. */
 watch(
@@ -91,6 +243,17 @@ watch(
     if (source.kind.type === 'local') {
       safUri.value = source.kind.safUri
       safPath.value = source.kind.displayPath
+    } else if (source.kind.type === 'mail') {
+      mailHost.value = source.kind.host
+      mailPort.value = source.kind.port
+      mailFolder.value = source.kind.folder
+      username.value = source.kind.username
+      quarantineAll.value = source.kind.quarantineAll
+      maxAttachmentMb.value = Math.round(source.kind.maxAttachmentBytes / 1024 / 1024)
+      maxMailsPerHour.value = source.kind.maxMailsPerHour
+      includeSeen.value = source.kind.includeSeen
+      void loadSenders()
+      void loadFetchState()
     } else {
       url.value = source.kind.url
       username.value = source.kind.username
@@ -147,8 +310,16 @@ async function testConnection() {
   testing.value = true
   testResult.value = null
   try {
-    await api.testSource(draft, password.value)
-    testResult.value = { ok: true, message: t('sourceForm.testOk') }
+    const unseen = await api.testSource(draft, password.value)
+    // Beim Postfach die Zahl mitnehmen: sie belegt, dass auch der Ordner
+    // stimmt, nicht nur die Anmeldung. Andere Quellenarten liefern `null`.
+    testResult.value = {
+      ok: true,
+      message:
+        unseen === null
+          ? t('sourceForm.testOk')
+          : t('sourceForm.testOkMailbox', { n: unseen }, unseen),
+    }
   } catch (e) {
     testResult.value = {
       ok: false,
@@ -182,6 +353,33 @@ function build(): Source | null {
       return null
     }
     sourceKind = { type: 'local', safUri: safUri.value, displayPath: safPath.value }
+  } else if (kind.value === 'mail') {
+    if (!mailHost.value.trim()) {
+      formError.value = t('sourceForm.errorHostRequired')
+      return null
+    }
+    if (!username.value.trim()) {
+      formError.value = t('sourceForm.errorUserRequired')
+      return null
+    }
+    sourceKind = {
+      type: 'mail',
+      host: mailHost.value.trim(),
+      port: mailPort.value,
+      username: username.value.trim(),
+      passwordRef: id,
+      folder: mailFolder.value.trim() || 'INBOX',
+      // Die Freigabeliste wächst durch Freigeben am Rahmen (F4), nicht über
+      // dieses Formular — beim Anlegen ist sie leer, also landet die erste
+      // Mail jedes Absenders in Quarantäne.
+      allowedSenders:
+        props.source?.kind.type === 'mail' ? props.source.kind.allowedSenders : [],
+      quarantineAll: quarantineAll.value,
+      maxAttachmentBytes: Math.max(1, maxAttachmentMb.value) * 1024 * 1024,
+      maxMailsPerHour: maxMailsPerHour.value,
+      includeSeen: includeSeen.value,
+      quality: props.source?.kind.type === 'mail' ? props.source.kind.quality : 'standard',
+    }
   } else {
     if (!url.value.trim()) {
       formError.value = t('sourceForm.errorUrlRequired')
@@ -267,15 +465,11 @@ function message(e: unknown): string {
              zwischengespeicherten Bilder ungültig machen. -->
         <fieldset v-if="!isEdit" class="kinds">
           <legend class="ss-label">{{ t('sourceForm.kind') }}</legend>
-          <label v-for="option in (['local', 'webDav', 'nextcloud'] as const)" :key="option" class="kind">
+          <label v-for="option in KINDS" :key="option" class="kind">
             <input v-model="kind" type="radio" :value="option" />
             <span class="kind-body">
-              <span class="kind-title">
-                {{ t(option === 'local' ? 'sourceForm.kindLocal' : option === 'webDav' ? 'sourceForm.kindWebdav' : 'sourceForm.kindNextcloud') }}
-              </span>
-              <span class="kind-hint">
-                {{ t(option === 'local' ? 'sourceForm.kindLocalHint' : option === 'webDav' ? 'sourceForm.kindWebdavHint' : 'sourceForm.kindNextcloudHint') }}
-              </span>
+              <span class="kind-title">{{ t(`sourceForm.kind_${option}`) }}</span>
+              <span class="kind-hint">{{ t(`sourceForm.kind_${option}_hint`) }}</span>
             </span>
           </label>
         </fieldset>
@@ -284,8 +478,192 @@ function message(e: unknown): string {
           <input v-model="name" type="text" :placeholder="t('sourceForm.namePlaceholder')" />
         </SettingRow>
 
+        <!-- Postfach (E-30). Ein Postfach je Rahmen: die Quellenliste laesst
+             kein zweites zu, weil das Papier genau eines vorsieht. -->
+        <template v-if="kind === 'mail'">
+          <SettingRow :label="t('sourceForm.mailHost')" stacked>
+            <input
+              v-model="mailHost"
+              type="text"
+              inputmode="url"
+              autocapitalize="off"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="imap.example.org"
+            />
+          </SettingRow>
+
+          <SettingRow :label="t('sourceForm.mailPort')">
+            <input v-model.number="mailPort" type="number" min="1" max="65535" class="narrow" />
+          </SettingRow>
+
+          <SettingRow :label="t('sourceForm.username')" stacked>
+            <input
+              v-model="username"
+              type="text"
+              inputmode="email"
+              autocapitalize="off"
+              autocomplete="username"
+              spellcheck="false"
+            />
+          </SettingRow>
+
+          <SettingRow
+            :label="t('sourceForm.password')"
+            :hint="isEdit ? t('sourceForm.passwordKeep') : undefined"
+            stacked
+          >
+            <input v-model="password" type="password" autocomplete="current-password" />
+          </SettingRow>
+
+          <SettingRow :label="t('sourceForm.mailFolder')" stacked>
+            <input
+              v-model="mailFolder"
+              type="text"
+              autocapitalize="off"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="INBOX"
+            />
+          </SettingRow>
+
+          <!-- Wartung F5–F7. Nur beim Bearbeiten: eine neue Quelle hat noch
+               keinen Abruf hinter sich. -->
+          <SettingRow v-if="isEdit" :label="t('sourceForm.fetchStatus')" stacked>
+            <div class="fetch-block">
+            <p class="fetch-status" :class="{ bad: lastFetch?.error }">
+              {{ fetchStatus }}
+            </p>
+            <div class="fetch-actions">
+              <button class="secondary" :disabled="fetching" @click="fetchNow">
+                {{ fetching ? t('sourceForm.fetchRunning') : t('sourceForm.fetchNow') }}
+              </button>
+              <button class="link" @click="showLog = !showLog">
+                {{ t('sourceForm.fetchLog') }}
+                <span aria-hidden="true">{{ showLog ? '▾' : '▸' }}</span>
+              </button>
+            </div>
+
+            <!-- Wartung F8. Steht beim Abrufstand, weil es dieselbe Frage
+                 beantwortet — nur gruendlicher. -->
+            <div class="resync">
+              <button
+                v-if="!resyncing"
+                class="link"
+                :title="t('sourceForm.resyncHint')"
+                @click="startResync"
+              >
+                {{ t('sourceForm.resync') }}
+              </button>
+              <template v-else>
+                <span class="progress">
+                  {{
+                    resyncProgress
+                      ? t('sourceForm.resyncRunning', {
+                          done: resyncProgress.done,
+                          total: resyncProgress.total,
+                          added: resyncProgress.added,
+                        })
+                      : t('sourceForm.fetchRunning')
+                  }}
+                </span>
+                <button class="link" @click="stopResync">
+                  {{ t('sourceForm.resyncCancel') }}
+                </button>
+              </template>
+            </div>
+
+            <!-- Eingeklappt: 50 Zeilen sind im Normalfall Beiwerk und wuerden
+                 das Formular unbrauchbar lang machen. -->
+            <div v-if="showLog" class="fetch-log">
+              <p class="hint">{{ t('sourceForm.fetchLogHint') }}</p>
+              <p v-if="fetchEntries.length === 0" class="hint">
+                {{ t('sourceForm.fetchLogEmpty') }}
+              </p>
+              <ol v-else>
+                <li v-for="(e, i) in fetchEntries" :key="i" :class="{ bad: e.error }">
+                  <span class="when">{{ logTime(e) }}</span>
+                  <span class="trigger">{{ triggerLabel(e) }}</span>
+                  <span class="outcome">
+                    {{
+                      e.error
+                        ? e.error
+                        : t('sourceForm.fetchLogLine', {
+                            checked: e.checked,
+                            added: e.added,
+                            known: e.alreadyKnown,
+                          })
+                    }}
+                  </span>
+                </li>
+              </ol>
+            </div>
+            </div>
+          </SettingRow>
+
+          <!-- E-34. Steht bewusst direkt unter dem Ordner: der Hinweis
+               empfiehlt einen eigenen Ordner statt der INBOX, und das Feld
+               dafuer soll daneben liegen. -->
+          <SettingRow
+            :label="t('sourceForm.includeSeen')"
+            :hint="t('sourceForm.includeSeenHint')"
+          >
+            <ToggleSwitch v-model="includeSeen" :label="t('sourceForm.includeSeen')" />
+          </SettingRow>
+
+          <SettingRow :label="t('sourceForm.quarantineAll')" :hint="t('sourceForm.quarantineAllHint')">
+            <ToggleSwitch
+              v-model="quarantineAll"
+              :label="t('sourceForm.quarantineAll')"
+            />
+          </SettingRow>
+
+          <!-- Freigegebene Absender (F4, E-32). Nur beim Bearbeiten: eine
+               neue Quelle hat noch keine Liste. Ohne diesen Abschnitt war die
+               Freigabe eine Einbahnstrasse — ein einmal bestaetigter Absender
+               liess sich nie mehr zuruecknehmen. -->
+          <SettingRow
+            v-if="isEdit"
+            :label="t('sourceForm.allowedSenders')"
+            :hint="t('sourceForm.allowedSendersHint')"
+            stacked
+          >
+            <p v-if="senders.length === 0" class="senders-empty">
+              {{ t('sourceForm.allowedSendersEmpty') }}
+            </p>
+            <ul v-else class="senders">
+              <li v-for="entry in senders" :key="entry.address">
+                <span class="sender-address">{{ entry.address }}</span>
+                <span class="sender-count">
+                  {{ t('sourceForm.senderPhotos', { n: entry.photoCount }, entry.photoCount) }}
+                </span>
+                <button
+                  class="sender-remove"
+                  :disabled="senderBusy === entry.address"
+                  :aria-label="t('sourceForm.removeSender')"
+                  :title="t('sourceForm.removeSender')"
+                  @click="removeSender(entry)"
+                >
+                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none"
+                       stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                    <path d="M5 5 L15 15 M15 5 L5 15" />
+                  </svg>
+                </button>
+              </li>
+            </ul>
+          </SettingRow>
+
+          <SettingRow :label="t('sourceForm.maxAttachment')">
+            <input v-model.number="maxAttachmentMb" type="number" min="1" max="200" class="narrow" />
+          </SettingRow>
+
+          <SettingRow :label="t('sourceForm.maxMailsPerHour')" :hint="t('sourceForm.maxMailsPerHourHint')">
+            <input v-model.number="maxMailsPerHour" type="number" min="0" max="500" class="narrow" />
+          </SettingRow>
+        </template>
+
         <!-- Lokaler Ordner (FA-20) -->
-        <template v-if="kind === 'local'">
+        <template v-else-if="kind === 'local'">
           <SettingRow
             :label="t('sourceForm.chooseFolder')"
             :hint="safPath ? t('sourceForm.folderChosen', { path: safPath }) : undefined"
@@ -351,20 +729,22 @@ function message(e: unknown): string {
           >
             <ToggleSwitch v-model="allowInsecureTls" :label="t('sourceForm.allowInsecureTls')" />
           </SettingRow>
-
-          <SettingRow :label="t('sourceForm.syncInterval')">
-            <select v-model.number="syncIntervalMinutes" class="narrow">
-              <option :value="15">15 min</option>
-              <option :value="60">1 h</option>
-              <option :value="360">6 h</option>
-              <option :value="1440">24 h</option>
-            </select>
-          </SettingRow>
         </template>
+
+        <!-- Abrufabstand: fuer jede Quelle ausser dem lokalen Ordner, der
+             beim Oeffnen ohnehin neu eingelesen wird. -->
+        <SettingRow v-if="kind !== 'local'" :label="t('sourceForm.syncInterval')">
+          <select v-model.number="syncIntervalMinutes" class="narrow">
+            <option :value="15">15 min</option>
+            <option :value="60">1 h</option>
+            <option :value="360">6 h</option>
+            <option :value="1440">24 h</option>
+          </select>
+        </SettingRow>
 
         <!-- Filter (FA-29) -->
         <SettingRow
-          v-if="kind !== 'nextcloud'"
+          v-if="kind === 'local' || kind === 'webDav'"
           :label="t('sourceForm.subfolders')"
           :hint="t('sourceForm.subfoldersHint')"
           stacked
@@ -382,9 +762,6 @@ function message(e: unknown): string {
 
         <p v-if="formError" class="error">{{ formError }}</p>
         <p v-if="props.saveError" class="error">{{ props.saveError }}</p>
-        <p v-if="testResult" class="result" :class="{ ok: testResult.ok }">
-          {{ testResult.message }}
-        </p>
       </div>
 
       <footer class="foot">
@@ -399,9 +776,23 @@ function message(e: unknown): string {
         >
           {{ t('sourceForm.removeSource') }}
         </button>
-        <button v-if="isRemote" class="secondary" :disabled="testing" @click="testConnection">
+        <button
+          v-if="isRemote || kind === 'mail'"
+          class="secondary"
+          :disabled="testing"
+          @click="testConnection"
+        >
           {{ testing ? t('sourceForm.testing') : t('sourceForm.test') }}
         </button>
+
+        <!-- Das Ergebnis steht neben seinem Ausloeser, nicht am Ende des
+             Formulars. Dort stand es vorher: die Schaltflaeche sitzt in der
+             festen Fusszeile, die Meldung im scrollbaren Rumpf — wer beim
+             Passwortfeld auf „Verbindung testen" tippte, sah nichts
+             geschehen. Am Geraet nachgestellt (E-33). -->
+        <p v-if="testResult" class="result" :class="{ ok: testResult.ok }">
+          {{ testResult.message }}
+        </p>
         <span class="spacer" />
         <button class="secondary" @click="emit('cancel')">{{ t('common.cancel') }}</button>
         <button class="primary" @click="save">{{ t('common.save') }}</button>
@@ -463,13 +854,200 @@ function message(e: unknown): string {
 .foot {
   display: flex;
   align-items: center;
+  /* Umbrechen erlaubt: im Bearbeiten-Dialog kommt „Quelle entfernen" dazu,
+     und dann bleibt neben den vier Schaltflaechen kaum Platz. Ohne diese
+     Zeile quetschte sich die Meldung am Geraet auf vier Zeilen in eine
+     handbreite Spalte. */
+  flex-wrap: wrap;
   gap: 10px;
   padding: 16px 24px;
   border-top: 1px solid var(--ss-border-soft);
 }
 
+/* Die Schaltflaechen behalten ihre Breite, die Meldung daneben gibt nach.
+   Am Tablet brach sonst „Verbindung testen" auf zwei Zeilen um, sobald das
+   Ergebnis danebenstand — der Beschriftung sieht man einen Umbruch als
+   Versehen an, einem Fliesstext nicht. */
+.foot > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .spacer {
   flex-grow: 1;
+}
+
+/* ── Abrufstand und Protokoll (Wartung F5–F7) ───────────────────────────── */
+
+/* Der Steuerbereich einer Einstellungszeile ist eine Reihe. Ohne diesen Block
+   standen Statuszeile, Schaltflaeche, Umschalter und Protokoll nebeneinander
+   und brachen einzeln um — am Geraet vier Spalten aus je zwei Zeilen. */
+.fetch-block {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+
+.fetch-status {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: var(--ss-text);
+}
+
+/* Ein fehlgeschlagener Abruf faellt sonst zwischen den uebrigen Zeilen nicht
+   auf — und er ist die einzige, die zum Handeln auffordert. */
+.fetch-status.bad {
+  color: var(--ss-error);
+}
+
+.fetch-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.fetch-actions .link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ss-text-dim);
+  cursor: pointer;
+}
+
+.resync {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.resync .link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--ss-text-dim);
+  cursor: pointer;
+}
+
+.resync .progress {
+  color: var(--ss-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.fetch-log {
+  margin-top: 12px;
+}
+
+.fetch-log .hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--ss-text-dim);
+}
+
+.fetch-log ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* Begrenzt, damit 50 Zeilen den Dialog nicht sprengen. */
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
+.fetch-log li {
+  display: flex;
+  gap: 10px;
+  padding: 4px 0;
+  border-top: 1px solid var(--ss-border-soft);
+  color: var(--ss-text-dim);
+}
+
+.fetch-log li.bad {
+  color: var(--ss-error);
+}
+
+.fetch-log .when {
+  flex: 0 0 90px;
+}
+
+.fetch-log .trigger {
+  flex: 0 0 72px;
+}
+
+/* Nicht `.result`: so heisst im selben Dialog schon die Meldung des
+   Verbindungstests, und die ist rot, solange sie nicht `ok` ist. Am Geraet
+   stand deshalb jede Protokollzeile in Fehlerfarbe, auch die geglueckten. */
+.fetch-log .outcome {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.senders {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.senders li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--ss-surface-2, rgba(255, 255, 255, 0.03));
+}
+
+/* Lange Adressen kuerzen statt umbrechen — die Zeile bleibt so hoch wie die
+   Schaltflaeche daneben. */
+.sender-address {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sender-count {
+  flex: 0 0 auto;
+  font-size: 13px;
+  color: var(--ss-text-dim);
+}
+
+.sender-remove {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ss-text-dim);
+  cursor: pointer;
+}
+
+.sender-remove:hover:not(:disabled) {
+  color: var(--ss-error);
+}
+
+.sender-remove:disabled {
+  opacity: 0.4;
+}
+
+.senders-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ss-text-dim);
 }
 
 .kinds {
@@ -587,9 +1165,15 @@ function message(e: unknown): string {
 }
 
 .error,
+/* Sitzt in der Fusszeile neben „Verbindung testen" (E-33). Die Grundbreite
+   von 240 px ist die Schwelle: passt sie daneben, steht die Meldung dort;
+   sonst rutscht sie auf eine eigene Zeile und bleibt lesbar, statt sich in
+   eine schmale Spalte zu quetschen. Servermeldungen koennen lang werden. */
 .result {
-  margin-top: 14px;
+  flex: 1 1 240px;
+  min-width: 0;
   font-size: 14px;
+  line-height: 1.35;
   color: var(--ss-error);
 }
 

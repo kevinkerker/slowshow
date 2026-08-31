@@ -64,6 +64,11 @@ impl RemoteClient {
         password: &str,
     ) -> Result<Option<Self>, DavError> {
         match &source.kind {
+            // Postfaecher laufen nicht ueber list/fetch: eine Mail wird als
+            // Ganzes geholt und ihre Anhaenge einzeln abgelegt, sonst laegen
+            // bei 25 MB je Anhang hunderte Megabyte gleichzeitig im Speicher
+            // (R-03). Der eigene Weg steht in `mail::imap` und `sync`.
+            SourceKind::Mail { .. } => Ok(None),
             SourceKind::Local { saf_uri, .. } => {
                 Ok(Some(Self::Local(LocalClient::new(app.clone(), saf_uri)?)))
             }

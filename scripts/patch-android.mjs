@@ -157,9 +157,44 @@ for (const { name, value } of extractAttributes(additions, 'application-attribut
 for (const { name, value } of extractAttributes(additions, 'activity-attributes')) {
   manifest = setAttribute(manifest, 'activity', name, value)
 }
+/**
+ * Rechte, die **nicht** mehr im Manifest stehen duerfen (E-38).
+ *
+ * Der Vordergrunddienst ist entfallen, und mit ihm drei Rechte. Ein
+ * versehentlich wieder eingefuegtes waere im Play Store ein Pruefpunkt, den
+ * niemand mehr erwartet — und in einer generierten Datei faellt es keinem auf.
+ */
+const forbidden = [
+  ['FOREGROUND_SERVICE', 'Vordergrunddienst entfaellt seit E-38'],
+  ['POST_NOTIFICATIONS', 'ohne Dienst gibt es keine Benachrichtigung (E-38)'],
+  ['REQUEST_IGNORE_BATTERY_OPTIMIZATIONS', 'nie im Code verwendet, entfernt mit E-38'],
+]
+
 for (const service of extractServices(additions)) {
   manifest = ensureService(manifest, service)
 }
+
+/**
+ * Entfernt Rechte und Dienste, die frueher einmal eingetragen wurden (E-38).
+ *
+ * `gen/` ist generiert, aber nicht bei jedem Lauf frisch: was dieses Skript
+ * einmal hineingeschrieben hat, bleibt dort stehen. Ohne diesen Schritt truege
+ * das Manifest die Rechte des Vordergrunddienstes weiter — unsichtbar, weil
+ * niemand eine generierte Datei liest, und im Play Store ein Pruefpunkt, den
+ * niemand mehr erwartet.
+ */
+function removeElement(xml, needle) {
+  return xml
+    .split(/\r?\n/)
+    .filter((line) => !line.includes(needle))
+    .join('\n')
+}
+
+for (const [needle] of forbidden) {
+  manifest = removeElement(manifest, needle)
+}
+// Der Dienst selbst samt seiner <property>-Begruendung.
+manifest = manifest.replace(/\s*<service[\s\S]*?SlowshowService[\s\S]*?<\/service>/g, '')
 
 writeFileSync(manifestPath, manifest, 'utf8')
 console.log('AndroidManifest.xml ergänzt (Rechte, Querformat, kein Backup)')
@@ -223,12 +258,18 @@ if (existsSync(iconSrc)) {
 
 const checks = [
   ['android.permission.INTERNET', 'Netzzugriff für FA-21/FA-23'],
-  ['REQUEST_IGNORE_BATTERY_OPTIMIZATIONS', 'Akku-Ausnahme für R-04'],
   ['android:allowBackup="false"', 'kein Cloud-Backup der Zugangsdaten (NF-05)'],
   ['sensorLandscape', 'Querformat (RB-02)'],
-  ['FOREGROUND_SERVICE_SPECIAL_USE', 'Vordergrunddienst (NF-01, E-24)'],
-  ['.SlowshowService', 'Dienst in <application> eingetragen (E-24)'],
 ]
+
+// `forbidden` steht oben, wo das Manifest zusammengebaut wird — dort wird es
+// zum Aufraeumen gebraucht, hier nur noch zur Gegenprobe.
+for (const [needle, why] of forbidden) {
+  if (manifest.includes(needle)) {
+    console.error(`${needle} steht wieder im Manifest — ${why}`)
+    process.exit(1)
+  }
+}
 
 // Gegenprobe fuers Icon: liegt in gen/ noch Tauris Standardlogo, faellt das
 // sonst erst auf dem Startbildschirm des Geraets auf.

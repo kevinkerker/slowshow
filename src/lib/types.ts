@@ -9,6 +9,31 @@
 /** Reihenfolge der Diashow (FA-03, fortgeschrieben durch E-29). */
 export type PlayOrder = 'smart' | 'random' | 'fileName' | 'chronological'
 
+/** Zeitraum der Diashow-Auswahl (F5). */
+export type TimeFilter =
+  | { type: 'all' }
+  | { type: 'last12Months' }
+  | { type: 'thisYear' }
+  | { type: 'years'; years: number[] }
+
+/** Welche Bilder in die Diashow kommen (F5). */
+export interface PlaybackFilter {
+  time: TimeFilter
+  /** Nur diese Absender. Leer = alle. */
+  senders: string[]
+  /** Bilder ohne Aufnahmedatum mitzeigen. */
+  includeUndated: boolean
+}
+
+/** Jahre und Absender mit Anzahl, für die Filterauswahl (F5). */
+export interface FilterFacets {
+  /** `[Jahr, Anzahl]`, neueste zuerst. */
+  years: [number, number][]
+  /** `[Absender, Anzahl]`, häufigste zuerst. */
+  senders: [string, number][]
+  undated: number
+}
+
 /** Feineinstellungen der Wiedergabe (E-29). */
 export interface PlaybackConfig {
   newBoost: boolean
@@ -45,6 +70,8 @@ export interface OverlayConfig {
   showSettingsButton: boolean
   /** Durchgestrichenes Auge — Bild aus der Diashow nehmen (FA-30). */
   showExcludeButton: boolean
+  /** Hinweis, wenn Fotos auf Freigabe warten (F4, E-31). */
+  showQuarantineHint: boolean
   /** Ziffern oder Zeiger für die Uhr über dem Foto (E-20). */
   clockStyle: ClockStyle
 }
@@ -132,6 +159,27 @@ export type SourceKind =
       usePreviewApi: boolean
       allowInsecureTls: boolean
     }
+  | {
+      /** Postfach, aus dem Fotos per Mail eintreffen (E-30). */
+      type: 'mail'
+      host: string
+      port: number
+      username: string
+      passwordRef: string
+      folder: string
+      /** Absender, deren Fotos ohne Quarantäne durchgehen (F4). */
+      allowedSenders: string[]
+      /** Auch bereits gelesene Nachrichten holen (E-34). */
+      includeSeen: boolean
+      /** Auch bekannte Absender erst in Quarantäne legen. */
+      quarantineAll: boolean
+      maxAttachmentBytes: number
+      maxMailsPerHour: number
+      quality: MailQuality
+    }
+
+/** Ablagequalität für Mail-Fotos (E-30). */
+export type MailQuality = 'frugal' | 'standard' | 'original'
 
 export interface Source {
   id: string
@@ -168,6 +216,8 @@ export interface AppConfig {
   orientation: Orientation
   /** Feineinstellungen der Wiedergabe (E-29). */
   playback: PlaybackConfig
+  /** Auswahl, welche Bilder laufen (F5). */
+  filter: PlaybackFilter
   language: 'auto' | 'de' | 'en'
   sources: Source[]
 }
@@ -198,10 +248,101 @@ export interface CacheEntry {
   thumbBytes: number | null
   /** Wie oft das Bild bereits gezeigt wurde (E-29). */
   showCount: number
+  /** Herkunft, falls das Bild per Mail kam (E-30). */
+  mail: MailMeta | null
 }
 
-/** Was der Bild-Browser anzeigt (E-25). */
-export type ImageFilter = 'all' | 'excluded' | 'included'
+/** Was der Bild-Browser anzeigt (E-25, erweitert durch E-31). */
+export type ImageFilter =
+  | 'all'
+  | 'excluded'
+  | 'included'
+  | 'quarantine'
+  /** Noch nie in der Diashow gewesen (Wartung F4). */
+  | 'neverShown'
+
+/** Wodurch ein Abruf ausgelöst wurde (Wartung F6). */
+export type FetchTrigger = 'interval' | 'manual' | 'resync'
+
+/** Fortschritt eines Postfach-Neuabgleichs (Wartung F8). */
+/** Belegung einer Gruppe — Jahr oder Absender (Wartung F9). */
+export interface StorageGroup {
+  label: string
+  count: number
+  bytes: number
+}
+
+/** Aufschlüsselung des Speichers (Wartung F9). */
+export interface StorageBreakdown {
+  byYear: StorageGroup[]
+  bySender: StorageGroup[]
+}
+
+/** Ergebnis der Datenbank-Prüfung (Wartung F10). */
+export interface DatabaseCheck {
+  /** Einträge im Index, zu denen keine Datei existiert. */
+  missingFiles: string[]
+  /** Dateien ohne Eintrag. */
+  orphanFiles: string[]
+  orphanThumbs: string[]
+  reclaimableBytes: number
+}
+
+export interface ResyncProgress {
+  done: number
+  total: number
+  added: number
+}
+
+/** Ein Eintrag im Abruf-Protokoll (Wartung F6). */
+export interface FetchLogEntry {
+  at: number
+  sourceId: string
+  trigger: FetchTrigger
+  /** Nachrichten im Ordner zum Zeitpunkt des Laufs. */
+  seenInFolder: number
+  /** Davon bereits bekannt — Stufe eins des zweistufigen Abrufs (E-34). */
+  alreadyKnown: number
+  checked: number
+  added: number
+  quarantined: number
+  skipped: number
+  failed: number
+  /** Klartext; `null` bei einem geglückten Lauf. */
+  error: string | null
+}
+
+/** Ein Bild in einer der Bestenlisten der Statistik (Wartung F1). */
+export interface TopEntry {
+  id: string
+  fileName: string
+  showCount: number
+  lastShown: number | null
+}
+
+/** Statistik der Zufallswiedergabe (Wartung F1). */
+export interface PlaybackStats {
+  /** Alle Bilder im Cache, auch ausgeblendete und wartende. */
+  total: number
+  /** Davon in der Diashow spielbar — Bezugsgröße des Durchlaufs. */
+  eligible: number
+  neverShown: number
+  /** Im laufenden Durchlauf noch offen. */
+  bagRemaining: number
+  cycles: number
+  mostShown: TopEntry[]
+  longestUnseen: TopEntry[]
+}
+
+/** Herkunft eines per Mail eingetroffenen Fotos (E-30). */
+export interface MailMeta {
+  sender: string
+  subject: string
+  /** Hash der Message-ID. */
+  messageId: string
+  /** Wartet das Foto auf Freigabe? (F4) */
+  quarantined: boolean
+}
 
 /** Ein Ausschnitt des Cache-Index für den Bild-Browser (E-25). */
 export interface ImagePage {
@@ -258,6 +399,8 @@ export const EVENTS = {
   slide: 'slowshow://slide',
   sync: 'slowshow://sync',
   syncProgress: 'slowshow://sync-progress',
+  /** Fortschritt eines Postfach-Neuabgleichs (Wartung F8). */
+  resync: 'slowshow://resync',
   display: 'slowshow://display',
   config: 'slowshow://config',
   mqtt: 'slowshow://mqtt',

@@ -75,9 +75,6 @@ class MainActivity : TauriActivity() {
 
         enterImmersiveMode()
 
-        // Nach dem Immersive-Modus, damit ein Fehler im Dienst den sichtbaren
-        // Teil des Starts nicht aufhaelt (NF-01, E-24).
-        SlowshowService.start(this)
     }
 
     /** Registriert diese Activity im Rust-Backend (siehe `src/android_bridge.rs`). */

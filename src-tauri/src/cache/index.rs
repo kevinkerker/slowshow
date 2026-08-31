@@ -12,6 +12,27 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+/// Herkunft eines per Mail eingetroffenen Fotos (E-30).
+///
+/// Als eigener Teilsatz und nicht als vier lose Felder am Eintrag: Absender,
+/// Betreff und Quarantäne haben nur bei Mail-Fotos einen Sinn, und ein
+/// `Option` sagt das deutlicher als vier `Option`s nebeneinander.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MailMeta {
+    /// Absenderadresse in Kleinschreibung.
+    pub sender: String,
+    pub subject: String,
+    /// Hash der Message-ID — Schutz gegen Doppelimport (F2).
+    pub message_id: String,
+    /// Wartet das Foto auf Freigabe? (F4)
+    ///
+    /// Quarantäne statt Löschen: ein unbekannter Absender ist meist die Tante,
+    /// die zum ersten Mal schickt, und nicht ein Angriff.
+    #[serde(default)]
+    pub quarantined: bool,
+}
+
 /// Ein Eintrag im Cache — beschreibt genau eine aufbereitete Bilddatei.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,6 +74,9 @@ pub struct CacheEntry {
     /// Aus der Diashow entfernt, ohne an der Quelle zu löschen (FA-30).
     #[serde(default)]
     pub excluded: bool,
+    /// Herkunft, falls das Bild per Mail kam (E-30).
+    #[serde(default)]
+    pub mail: Option<MailMeta>,
     /// Größe des Vorschaubilds, sobald eines erzeugt wurde (E-25).
     ///
     /// `None` heißt „noch keins" — Vorschaubilder entstehen beim ersten
@@ -64,6 +88,14 @@ pub struct CacheEntry {
 }
 
 impl CacheEntry {
+    /// Wartet das Bild auf Freigabe? (F4)
+    ///
+    /// Quarantänefotos laufen nicht in der Diashow und zählen nicht in die
+    /// Urne — sie sind noch nicht Teil des Bestands, nur schon im Cache.
+    pub fn is_quarantined(&self) -> bool {
+        self.mail.as_ref().is_some_and(|m| m.quarantined)
+    }
+
     /// Ist das Bild im Hochformat? Grundlage des Paar-Modus (FA-08).
     pub fn is_portrait(&self) -> bool {
         self.height > self.width
@@ -179,6 +211,12 @@ impl CacheIndex {
 
     pub fn values(&self) -> impl Iterator<Item = &CacheEntry> {
         self.entries.values()
+    }
+
+    /// Wie [`Self::values`], aber veraenderbar — fuer Reihenaenderungen an
+    /// vielen Eintraegen (etwa alle Fotos eines Absenders, F4).
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut CacheEntry> {
+        self.entries.values_mut()
     }
 
     /// Summe aller Cache-Dateien in Bytes — Vergleichswert für FA-27.
@@ -371,6 +409,7 @@ mod tests {
             last_shown: None,
             excluded: false,
             show_count: 0,
+            mail: None,
             thumb_bytes: None,
         }
     }

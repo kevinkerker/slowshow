@@ -5,7 +5,7 @@
  * Liste, Hinzufügen-Feld und die Cache-Fußzeile — genau der Aufbau aus dem
  * Entwurf.
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SourceCard from '../SourceCard.vue'
 import SourceDialog from '../SourceDialog.vue'
@@ -13,6 +13,16 @@ import { useConfigStore } from '@/stores/config'
 import { formatBytes } from '@/lib/format'
 import { localeTag } from '@/lib/i18n'
 import type { Source, SyncReport } from '@/lib/types'
+
+const props = defineProps<{
+  /**
+   * Quelle, die beim Betreten des Bereichs sofort geoeffnet wird.
+   *
+   * Der Bild-Browser verweist so auf die Freigabeliste im Postfach-Dialog
+   * (E-32). Der Wert kommt aus `SettingsView`.
+   */
+  openSourceId?: string | null
+}>()
 
 const { t } = useI18n()
 const store = useConfigStore()
@@ -29,6 +39,18 @@ const cacheFill = computed(() => {
   if (!stats.value || stats.value.maxBytes === 0) return 0
   return Math.min(100, (stats.value.bytes / stats.value.maxBytes) * 100)
 })
+
+// `immediate`, weil der Bereich erst beim Wechsel eingehaengt wird: ein
+// Wechsel *auf* diesen Bereich mit gesetzter Id feuert sonst nie.
+watch(
+  () => props.openSourceId,
+  (id) => {
+    if (!id) return
+    const source = store.sources.find((s) => s.id === id)
+    if (source) openEdit(source)
+  },
+  { immediate: true },
+)
 
 function openAdd() {
   editing.value = null

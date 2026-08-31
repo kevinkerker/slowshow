@@ -22,6 +22,18 @@ const router = useRouter()
 const { t } = useI18n()
 const pane = ref<Pane>('sources')
 
+/// Quelle, die beim Wechsel in den Quellenbereich gleich geoeffnet wird.
+///
+/// Der Bild-Browser verweist auf die Freigabeliste, die im Postfach-Dialog
+/// sitzt (E-32). Ohne diesen Umweg muesste der Nutzer selbst den Bereich
+/// wechseln und die richtige Quelle heraussuchen.
+const openSourceId = ref<string | null>(null)
+
+function showSource(id: string) {
+  openSourceId.value = id
+  pane.value = 'sources'
+}
+
 const NAV: Array<{ key: Pane; icon: string[] }> = [
   {
     key: 'sources',
@@ -93,8 +105,8 @@ const title = computed(() => t(`nav.${pane.value}`))
       </nav>
 
       <div class="content">
-        <SourcesPane v-if="pane === 'sources'" />
-        <ImagesPane v-else-if="pane === 'images'" />
+        <SourcesPane v-if="pane === 'sources'" :open-source-id="openSourceId" />
+        <ImagesPane v-else-if="pane === 'images'" @open-source="showSource" />
         <ShowPane v-else-if="pane === 'show'" />
         <SchedulePane v-else-if="pane === 'schedule'" />
         <SystemPane v-else />
