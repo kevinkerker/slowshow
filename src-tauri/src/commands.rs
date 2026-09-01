@@ -160,9 +160,9 @@ pub fn image_info(state: State<'_, AppState>, id: String) -> Option<CacheEntry> 
 pub fn exclude_image(app: AppHandle, state: State<'_, AppState>, id: String) -> Res<()> {
     state.exclude_image(&id)?;
 
-    if let Some(slide) = state.current_slide() {
-        let _ = app.emit(events::SLIDE, slide);
-    }
+    // Auch `None` wird gemeldet: war es das letzte Bild, muss der Rahmen es vom
+    // Schirm nehmen. Vorher blieb genau dann das ausgeblendete Bild stehen.
+    let _ = app.emit(events::SLIDE, state.current_slide());
     Ok(())
 }
 
@@ -222,8 +222,8 @@ pub struct FilterFacets {
 
 #[tauri::command]
 pub fn filter_facets(state: State<'_, AppState>) -> FilterFacets {
-    use std::collections::HashMap;
     use chrono::{Datelike, TimeZone, Utc};
+    use std::collections::HashMap;
 
     let Ok(cache) = state.cache.lock() else {
         return FilterFacets {
@@ -298,7 +298,11 @@ pub fn release_quarantine(
             let ids: Vec<String> = cache
                 .index()
                 .values()
-                .filter(|e| e.mail.as_ref().is_some_and(|m| m.quarantined && m.sender == sender))
+                .filter(|e| {
+                    e.mail
+                        .as_ref()
+                        .is_some_and(|m| m.quarantined && m.sender == sender)
+                })
                 .map(|e| e.id.clone())
                 .collect();
             for id in ids {
@@ -319,7 +323,10 @@ pub fn release_quarantine(
                     allowed_senders, ..
                 } = &mut s.kind
                 {
-                    if !allowed_senders.iter().any(|a| a.eq_ignore_ascii_case(&sender)) {
+                    if !allowed_senders
+                        .iter()
+                        .any(|a| a.eq_ignore_ascii_case(&sender))
+                    {
                         allowed_senders.push(sender.clone());
                     }
                 }
@@ -352,7 +359,9 @@ pub fn allowed_senders(state: State<'_, AppState>, source_id: String) -> Res<Vec
             return Err(format!("Unbekannte Quelle: {source_id}"));
         };
         match &source.kind {
-            SourceKind::Mail { allowed_senders, .. } => allowed_senders.clone(),
+            SourceKind::Mail {
+                allowed_senders, ..
+            } => allowed_senders.clone(),
             _ => return Err("Diese Quelle ist kein Postfach".into()),
         }
     };
@@ -388,7 +397,10 @@ pub fn remove_allowed_sender(
     let mut found = false;
     state.update_config(|c| {
         if let Some(source) = c.sources.iter_mut().find(|s| s.id == source_id) {
-            if let SourceKind::Mail { allowed_senders, .. } = &mut source.kind {
+            if let SourceKind::Mail {
+                allowed_senders, ..
+            } = &mut source.kind
+            {
                 let before = allowed_senders.len();
                 allowed_senders.retain(|a| !a.trim().eq_ignore_ascii_case(sender.trim()));
                 found = allowed_senders.len() < before;
@@ -465,7 +477,7 @@ pub async fn resync_mailbox(app: AppHandle, source_id: String) -> Res<usize> {
             .get(&reference)
             .unwrap_or_default()
             .to_string();
-        (source, password, config.cache)
+        (source, password, state.effective_cache_config())
     };
 
     let Some(mut mailbox) = crate::mail::sync::mailbox_config(&source, &password) else {
@@ -653,9 +665,7 @@ pub fn diagnostic_report(
 
 /// Belegung nach Jahr und Absender (Wartung F9).
 #[tauri::command]
-pub fn storage_breakdown(
-    state: State<'_, AppState>,
-) -> Res<crate::maintenance::StorageBreakdown> {
+pub fn storage_breakdown(state: State<'_, AppState>) -> Res<crate::maintenance::StorageBreakdown> {
     let cache = state.cache.lock().map_err(|_| "Cache gesperrt")?;
     Ok(crate::maintenance::storage_breakdown(
         cache.index(),
@@ -695,12 +705,9 @@ pub fn repair_database(app: AppHandle, state: State<'_, AppState>) -> Res<u64> {
         let mut cache = state.cache.lock().map_err(|_| "Cache gesperrt")?;
         let bilder = cache.image_ids_on_disk();
         let vorschau = cache.thumb_ids_on_disk();
-        let check = crate::maintenance::check_database(
-            cache.index(),
-            &bilder,
-            &vorschau,
-            &|id| cache.file_bytes(id),
-        );
+        let check = crate::maintenance::check_database(cache.index(), &bilder, &vorschau, &|id| {
+            cache.file_bytes(id)
+        });
         let frei = cache.repair(&check);
         cache.flush().map_err(|e| e.to_string())?;
         log::info!(
@@ -858,6 +865,29 @@ pub fn quarantine_count(state: State<'_, AppState>) -> usize {
 #[tauri::command]
 pub fn set_frame_orientation(state: State<'_, AppState>, portrait: bool) {
     state.set_frame_portrait(portrait);
+}
+
+/// Fassung der laufenden App (E-13, Wartung F11).
+///
+/// Aus `CARGO_PKG_VERSION` und damit aus derselben Quelle wie der
+/// Diagnosebericht. Vorher stand in der Oberflaeche eine feste Zeichenkette,
+/// die bei `0.1.0` stehengeblieben war, waehrend das Paket schon bei 1.0.0 war
+/// — wer eine Fehlermeldung schickt, nennt darin die falsche Fassung.
+#[tauri::command]
+pub fn app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+/// Meldet die Displaygroesse in echten Pixeln (NF-12, R-03).
+///
+/// Wie die Ausrichtung von der Oberflaeche gemeldet: nur die WebView kennt
+/// `screen` und `devicePixelRatio`. Das Backend deckelt damit die Zielgroesse
+/// beim Aufbereiten, statt jedes Foto auf 2560x1600 zu bringen und der WebView
+/// pro Bild sieben Megabyte aufzuladen, die auf dem Schirm nicht ankommen.
+#[tauri::command]
+pub fn set_display_size(state: State<'_, AppState>, width: u32, height: u32) {
+    state.set_display_size(width, height);
+    log::info!("Displaygroesse gemeldet: {width}x{height}");
 }
 
 // ── Bild-Browser (E-25) ──────────────────────────────────────────────────────
@@ -1119,11 +1149,7 @@ fn effective_password(typed: &str, stored: &str) -> String {
 /// (siehe `mail::imap::test_connection`). Sie wanderte vorher nur ins
 /// Protokoll, wo sie niemand sieht; die Oberfläche meldete bloß „erfolgreich".
 #[tauri::command]
-pub async fn test_source(
-    app: AppHandle,
-    source: Source,
-    password: String,
-) -> Res<Option<u32>> {
+pub async fn test_source(app: AppHandle, source: Source, password: String) -> Res<Option<u32>> {
     // Beim Bearbeiten bleibt das Passwortfeld leer -- der Hinweis darunter
     // sagt ausdruecklich, dass das gespeicherte dann erhalten bleibt. Der
     // Test reichte diesen leeren Wert wortwoertlich an den Server weiter und
@@ -1188,38 +1214,22 @@ pub async fn sync_now(app: AppHandle, source_id: Option<String>) -> Res<Vec<Sync
     run_sync(&app, source_id, false).await
 }
 
-/// Führt die Synchronisierung aus.
+/// Führt die Synchronisierung aus (FA-28, E-43).
 ///
 /// `only_due` beschränkt auf Quellen, deren Intervall abgelaufen ist — so
-/// arbeitet der Hintergrund-Zeitgeber (FA-28).
+/// arbeitet der Hintergrund-Zeitgeber.
+///
+/// Quellen werden eingereiht, nicht abgewiesen: höchstens
+/// [`MAX_PARALLEL_SOURCES`] laufen gleichzeitig, der Rest wartet der Reihe
+/// nach. Vorher gab es eine Sperre über alle Quellen, und ein zweiter Aufruf
+/// bekam einen Fehler — ein „Jetzt abgleichen" während des Hintergrundlaufs
+/// war damit verloren, und jeder Takt, der einen laufenden Sync antraf,
+/// übersprang sich ganz.
+///
+/// Zurück kommen die Berichte der Quellen, die **dieser** Aufruf eingereiht
+/// hat, in der Reihenfolge des Eingangs. Eine leere Liste heißt „läuft schon",
+/// nicht „nichts passiert".
 pub async fn run_sync(
-    app: &AppHandle,
-    source_id: Option<String>,
-    only_due: bool,
-) -> Res<Vec<SyncReport>> {
-    if !app.state::<AppState>().try_begin_sync() {
-        return Err("Es läuft bereits eine Synchronisierung".into());
-    }
-
-    // Die Sperre wird über `Drop` gelöst, nicht am Ende der Funktion. Ein
-    // Panic in einer der `expect`-Stellen des Sync-Pfads würde die Sperre sonst
-    // dauerhaft gesetzt lassen und jede weitere Synchronisierung bis zum
-    // Neustart der App verhindern — auf einem unbeaufsichtigten Gerät fiele das
-    // niemandem auf.
-    let _guard = SyncGuard(app.clone());
-    run_sync_inner(app, source_id, only_due).await
-}
-
-/// Gibt die Sync-Sperre frei, sobald sie den Gültigkeitsbereich verlässt.
-struct SyncGuard(AppHandle);
-
-impl Drop for SyncGuard {
-    fn drop(&mut self) {
-        self.0.state::<AppState>().end_sync();
-    }
-}
-
-async fn run_sync_inner(
     app: &AppHandle,
     source_id: Option<String>,
     only_due: bool,
@@ -1235,20 +1245,102 @@ async fn run_sync_inner(
             .filter(|s| !only_due || s.is_sync_due(now))
             .cloned()
             .collect();
-        (sources, config.cache)
+        (sources, state.effective_cache_config())
     };
 
+    // Entdoppeln statt abweisen (E-43): was schon laeuft oder wartet, wird
+    // nicht ein zweites Mal angestossen. Eine leere Liste ist deshalb kein
+    // Fehler mehr, sondern heisst "ist bereits unterwegs".
+    let sources: Vec<Source> = {
+        let state = app.state::<AppState>();
+        let ids: Vec<String> = sources.iter().map(|s| s.id.clone()).collect();
+        let claimed = state.claim_sources(&ids);
+        sources
+            .into_iter()
+            .filter(|s| claimed.contains(&s.id))
+            .collect()
+    };
+
+    if sources.is_empty() {
+        log::debug!("Sync: nichts einzureihen, die Quellen sind bereits unterwegs");
+        return Ok(Vec::new());
+    }
+
     log::info!(
-        "Sync angestossen: {} Quelle(n) in Frage kommend (only_due={only_due})",
+        "Sync angestossen: {} Quelle(n) eingereiht (only_due={only_due})",
         sources.len()
     );
 
-    let mut reports = Vec::new();
-    for source in sources {
+    // Alle Quellen als Futures nebeneinander, der Semaphor laesst hoechstens
+    // `MAX_PARALLEL_SOURCES` gleichzeitig hindurch — das ist die ganze
+    // Warteschlange.
+    //
+    // Bewusst **ohne** `spawn`: die Arbeit bleibt damit in der Aufgabe des
+    // Aufrufers und wird mit ihr abgebrochen. Abgesetzte Aufgaben liefen beim
+    // Beenden der App weiter und griffen auf einen Zustand zu, den Tauri schon
+    // abgeraeumt hat — genau der Absturz, gegen den `SHUTTING_DOWN` in `lib.rs`
+    // steht.
+    let slots = app.state::<AppState>().sync_slots();
+    let laeufe = sources.into_iter().map(|source| {
+        let slots = std::sync::Arc::clone(&slots);
+        let cfg = &cfg;
+        async move {
+            let _permit = slots.acquire().await.ok();
+            // Der Waechter gibt die Anmeldung auch dann frei, wenn der Lauf
+            // unterwegs abbricht.
+            let _guard = SourceGuard(app.clone(), source.id.clone());
+            sync_one_source(app, source, cfg, only_due, now).await
+        }
+    });
+
+    // `join_all` behaelt die Reihenfolge des Eingangs bei, nicht die des Endes:
+    // sonst haenge die Zuordnung Bericht -> Quelle daran, welche Quelle
+    // zufaellig schneller war.
+    let reports = futures_util::future::join_all(laeufe)
+        .await
+        .into_iter()
+        .flatten()
+        .collect();
+
+    Ok(reports)
+}
+
+/// Gibt die Anmeldung einer Quelle frei, sobald sie den Gueltigkeitsbereich
+/// verlaesst (E-43).
+///
+/// Wie die frueherere Sync-Sperre ueber `Drop` und nicht am Ende der Funktion:
+/// ein Panic im Sync-Pfad liesse die Quelle sonst dauerhaft angemeldet, und sie
+/// wuerde bis zum Neustart der App nie wieder abgeglichen — auf einem
+/// unbeaufsichtigten Geraet faellt das niemandem auf.
+struct SourceGuard(AppHandle, String);
+
+impl Drop for SourceGuard {
+    fn drop(&mut self) {
+        self.0.state::<AppState>().release_source(&self.1);
+    }
+}
+
+/// Gleicht eine einzelne Quelle ab.
+///
+/// `None` heisst "uebersprungen, kein Bericht" — etwa wenn zu der Quellenart
+/// kein Client gehoert. Ein Fehler *beim* Abgleich kommt dagegen als Bericht
+/// mit gesetztem `error` zurueck: er gehoert in die Anzeige und ins Protokoll.
+async fn sync_one_source(
+    app: &AppHandle,
+    source: Source,
+    cfg: &crate::model::CacheConfig,
+    only_due: bool,
+    now: i64,
+) -> Option<SyncReport> {
+    {
         let password = {
             let state = app.state::<AppState>();
             let reference = password_ref(&source.kind).unwrap_or(&source.id).to_string();
-            let guard = state.secrets.lock().map_err(|_| "Zugangsdaten gesperrt")?;
+            let Ok(guard) = state.secrets.lock() else {
+                let mut r = SyncReport::for_source(&source.id);
+                r.error = Some("Zugangsdaten gesperrt".into());
+                return Some(r);
+            };
             guard.get(&reference).unwrap_or_default().to_string()
         };
 
@@ -1263,7 +1355,7 @@ async fn run_sync_inner(
                 &source,
                 &password,
                 &state.cache,
-                &cfg,
+                cfg,
                 now,
                 &crate::mail::sync::MailMemory {
                     seen: &|h: &str| {
@@ -1321,21 +1413,19 @@ async fn run_sync_inner(
                 });
             }
             let _ = app.emit(events::SYNC, &r);
-            reports.push(r);
-            continue;
+            return Some(r);
         }
 
         let client = match RemoteClient::from_source(app, &source, &password) {
             Ok(Some(c)) => c,
             Ok(None) => {
                 log::warn!("'{}': kein Client fuer diese Quellenart", source.name);
-                continue;
+                return None;
             }
             Err(e) => {
                 let mut r = SyncReport::for_source(&source.id);
                 r.error = Some(e.to_string());
-                reports.push(r);
-                continue;
+                return Some(r);
             }
         };
 
@@ -1347,7 +1437,7 @@ async fn run_sync_inner(
                 &source,
                 &client,
                 &state.cache,
-                &cfg,
+                cfg,
                 &protected,
                 now,
                 &move |p| {
@@ -1397,10 +1487,8 @@ async fn run_sync_inner(
             app.state::<AppState>().rebuild_playlist();
         }
         let _ = app.emit(events::SYNC, &report);
-        reports.push(report);
+        Some(report)
     }
-
-    Ok(reports)
 }
 
 // ── Hilfen ───────────────────────────────────────────────────────────────────
@@ -1457,10 +1545,22 @@ mod tests {
         // zu erklaeren, und es gehoert nicht in die Liste derer, die noch
         // drankommen sollen. Dasselbe gilt fuer wartende (Wartung F4).
         let f = ImageFilter::NeverShown;
-        assert!(matches_image_filter(&bild(false, false, 0), f), "frisch importiert");
-        assert!(!matches_image_filter(&bild(false, false, 1), f), "schon gezeigt");
-        assert!(!matches_image_filter(&bild(true, false, 0), f), "ausgeblendet");
-        assert!(!matches_image_filter(&bild(false, true, 0), f), "in Quarantaene");
+        assert!(
+            matches_image_filter(&bild(false, false, 0), f),
+            "frisch importiert"
+        );
+        assert!(
+            !matches_image_filter(&bild(false, false, 1), f),
+            "schon gezeigt"
+        );
+        assert!(
+            !matches_image_filter(&bild(true, false, 0), f),
+            "ausgeblendet"
+        );
+        assert!(
+            !matches_image_filter(&bild(false, true, 0), f),
+            "in Quarantaene"
+        );
     }
 
     #[test]

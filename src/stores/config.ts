@@ -26,23 +26,38 @@ export const useConfigStore = defineStore('config', () => {
   const stats = ref<CacheStats | null>(null)
   const counts = ref<Record<string, number>>({})
   const display = ref<DisplayState | null>(null)
-  const syncing = ref<string | null>(null)
+  /** Quellen, deren Abgleich diese Ansicht selbst angestoßen hat (E-43). */
+  const syncing = ref<Set<string>>(new Set())
   const lastReport = ref<SyncReport | null>(null)
-  /** Zwischenstand des laufenden Syncs — treibt die Anzeige in der Quellenliste. */
-  const progress = ref<SyncProgress | null>(null)
+  /**
+   * Zwischenstand je Quelle — treibt die Anzeige in der Quellenliste.
+   *
+   * Nach Quelle geschlüsselt, weil seit E-43 zwei Quellen gleichzeitig laufen
+   * können. Ein einzelner Wert zeigte sonst abwechselnd die eine und die
+   * andere, und beide Fortschrittsbalken zuckten durcheinander.
+   */
+  const progress = ref<Record<string, SyncProgress>>({})
   const error = ref<string | null>(null)
 
   const sources = computed(() => config.value?.sources ?? [])
 
   /**
-   * Welche Quelle gerade synchronisiert wird — egal ob von Hand angestoßen
-   * oder vom Zeitgeber im Backend (FA-28).
+   * Wird diese Quelle gerade synchronisiert — egal ob von Hand angestoßen oder
+   * vom Zeitgeber im Backend (FA-28)?
    *
    * `syncing` kennt nur die selbst ausgelösten Läufe. Ohne den Rückfall auf den
    * Fortschritt liefe ein Hintergrund-Sync für den Nutzer unsichtbar, während
    * sich die Bilderzahl scheinbar von selbst ändert.
    */
-  const activeSyncSourceId = computed(() => syncing.value ?? progress.value?.sourceId ?? null)
+  function isSyncing(id: string): boolean {
+    return syncing.value.has(id) || progress.value[id] !== undefined
+  }
+
+  /** Zwischenstand dieser Quelle, falls einer vorliegt. */
+  function progressFor(id: string): SyncProgress | null {
+    return progress.value[id] ?? null
+  }
+
   const ready = computed(() => config.value !== null)
 
   let unlisten: UnlistenFn[] = []
@@ -67,13 +82,15 @@ export const useConfigStore = defineStore('config', () => {
     unlisten.push(
       await listen<SyncReport>(EVENTS.sync, (e) => {
         lastReport.value = e.payload
-        progress.value = null
+        // Nur den Zwischenstand dieser Quelle wegräumen: eine zweite kann
+        // weiterlaufen, und ihr Balken darf davon nicht verschwinden (E-43).
+        delete progress.value[e.payload.sourceId]
         void refreshStats()
       }),
     )
     unlisten.push(
       await listen<SyncProgress>(EVENTS.syncProgress, (e) => {
-        progress.value = e.payload
+        progress.value[e.payload.sourceId] = e.payload
       }),
     )
   }
@@ -142,10 +159,13 @@ export const useConfigStore = defineStore('config', () => {
    */
   async function syncSource(id: string): Promise<SyncReport | null> {
     const source = sources.value.find((s) => s.id === id)
-    if (!source || syncing.value) return null
+    // Nur diese eine Quelle darf nicht doppelt laufen. Vorher blockierte jeder
+    // laufende Abgleich jeden anderen — auch den einer ganz anderen Quelle
+    // (E-43).
+    if (!source || syncing.value.has(id)) return null
 
-    syncing.value = id
-    progress.value = null
+    syncing.value.add(id)
+    delete progress.value[id]
     error.value = null
     try {
       const reports = await api.syncNow(id)
@@ -155,8 +175,8 @@ export const useConfigStore = defineStore('config', () => {
       error.value = e instanceof Error ? e.message : String(e)
       return null
     } finally {
-      syncing.value = null
-      progress.value = null
+      syncing.value.delete(id)
+      delete progress.value[id]
       await refreshStats()
     }
   }
@@ -171,7 +191,8 @@ export const useConfigStore = defineStore('config', () => {
     progress,
     error,
     sources,
-    activeSyncSourceId,
+    isSyncing,
+    progressFor,
     ready,
     load,
     dispose,

@@ -25,9 +25,9 @@ pub mod config;
 pub mod control;
 pub mod decode;
 pub mod mail;
+pub mod maintenance;
 pub mod model;
 pub mod mqtt;
-pub mod maintenance;
 pub mod orientation;
 pub mod playlist;
 pub mod remote;
@@ -140,6 +140,8 @@ pub fn run() {
             commands::remove_allowed_sender,
             commands::filter_facets,
             commands::set_frame_orientation,
+            commands::set_display_size,
+            commands::app_version,
             commands::apply_orientation,
             commands::cache_stats,
             commands::source_counts,
@@ -333,6 +335,12 @@ fn spawn_background_tasks(app: tauri::AppHandle) {
     let sync_app = app.clone();
     handles.push(tauri::async_runtime::spawn(async move {
         let mut ticker = tokio::time::interval(SYNC_TICK);
+        // Seit E-43 wartet `run_sync` auf seine Quellen, statt bei einem
+        // laufenden Abgleich sofort abzuweisen. Ein Lauf über tausende Bilder
+        // dauert Minuten — mit dem voreingestellten `Burst` holte der Zeitgeber
+        // danach jeden verpassten Takt sofort nach und riefe zehnmal
+        // hintereinander auf, nur um zehnmal „nichts fällig" zu bekommen.
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         // Der erste Tick feuert sofort — beim Start soll einmal geprüft werden.
         while still_running() {
             ticker.tick().await;
@@ -340,9 +348,6 @@ fn spawn_background_tasks(app: tauri::AppHandle) {
                 Ok(reports) if !reports.is_empty() => {
                     log::info!("Hintergrund-Sync: {} Quelle(n)", reports.len());
                 }
-                // „läuft bereits" ist der Normalfall, wenn der Nutzer von Hand
-                // synchronisiert — kein Grund für eine Warnung.
-                Err(e) if e.contains("bereits") => log::debug!("{e}"),
                 Err(e) => log::warn!("Hintergrund-Sync: {e}"),
                 _ => {}
             }

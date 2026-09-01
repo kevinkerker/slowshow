@@ -28,6 +28,10 @@ pub enum DecodeError {
     Decode(#[from] image::ImageError),
     #[error("Bild unterschreitet die Mindestauflösung ({width}x{height})")]
     TooSmall { width: u32, height: u32 },
+    /// Der Arbeitsthread ist weggebrochen (E-43). Kommt praktisch nur beim
+    /// Beenden der App vor; der Aufrufer behandelt es wie einen Dekodierfehler.
+    #[error("Aufbereitung abgebrochen: {0}")]
+    Interrupted(String),
 }
 
 /// Ein für den Cache aufbereitetes Bild.
@@ -295,9 +299,112 @@ pub fn prepare(
     })
 }
 
+/// [`prepare`] auf einem Arbeitsthread (E-43).
+///
+/// Dekodieren, Skalieren und neu Kodieren sind Rechenarbeit von hunderten
+/// Millisekunden je Bild. Inline im Async-Lauf belegt das einen Worker-Thread
+/// der Laufzeit — bei zwei gleichzeitigen Quellen zwei davon, und auf denselben
+/// Threads warten die MQTT-Schleife, der REST-Server und der Anzeige-Zeitgeber.
+/// Auf einem Tablet mit vier Kernen ist das der Unterschied zwischen „der
+/// Rahmen laeuft waehrend des Syncs weiter" und „er steht".
+///
+/// Die Bytes wandern hinein statt als Verweis: der Arbeitsthread ueberlebt den
+/// Aufrufer moeglicherweise, eine Leihgabe ginge dort nicht.
+pub async fn prepare_off_thread(
+    bytes: Vec<u8>,
+    max_w: u32,
+    max_h: u32,
+    quality: u8,
+    min_w: u32,
+    min_h: u32,
+) -> Result<Prepared, DecodeError> {
+    match tokio::task::spawn_blocking(move || prepare(&bytes, max_w, max_h, quality, min_w, min_h))
+        .await
+    {
+        Ok(result) => result,
+        Err(e) => Err(DecodeError::Interrupted(e.to_string())),
+    }
+}
+
+/// [`prepare`] aus einem *synchronen* Rueckruf heraus, ohne den Async-Lauf zu
+/// blockieren (E-43).
+///
+/// Der Postfach-Abruf reicht jede Nachricht an einen synchronen Rueckruf; ein
+/// Arbeitsthread wie in [`prepare_off_thread`] ginge dort nur, wenn der
+/// Rueckruf durch das ganze IMAP-Modul hindurch async waere. `block_in_place`
+/// erreicht dasselbe von innen: es meldet der mehrfaedigen Laufzeit an, dass
+/// dieser Thread gleich rechnet, und die schiebt die uebrigen Aufgaben auf
+/// andere Threads.
+///
+/// Der Rueckfall ist keine Vorsichtsmassnahme ins Blaue: `block_in_place`
+/// **paniciert** auf einer einfaedigen Laufzeit, und genau die legt
+/// `#[tokio::test]` ohne weitere Angabe an. Ohne die Abfrage waere jeder
+/// kuenftige Test ueber diesen Pfad ein Absturz statt eines Fehlschlags.
+pub fn prepare_yielding(
+    bytes: &[u8],
+    max_w: u32,
+    max_h: u32,
+    quality: u8,
+    min_w: u32,
+    min_h: u32,
+) -> Result<Prepared, DecodeError> {
+    use tokio::runtime::{Handle, RuntimeFlavor};
+
+    match Handle::try_current() {
+        Ok(h) if h.runtime_flavor() == RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(|| prepare(bytes, max_w, max_h, quality, min_w, min_h))
+        }
+        _ => prepare(bytes, max_w, max_h, quality, min_w, min_h),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Die beiden Wege neben `prepare` muessen dasselbe Bild liefern.
+    ///
+    /// Sie sind reine Verlagerung der Rechenarbeit (E-43) — weicht ihr Ergebnis
+    /// ab, ist an der Aufbereitung etwas verrutscht, und im Cache laegen je
+    /// nach Quellenart verschiedene Bilder.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn verlagerte_aufbereitung_liefert_dasselbe_bild_e_43() {
+        let quelle = test_jpeg(800, 600);
+
+        let direkt = prepare(&quelle, 400, 400, 85, 0, 0).unwrap();
+        let thread = prepare_off_thread(quelle.clone(), 400, 400, 85, 0, 0)
+            .await
+            .unwrap();
+        let inplace = prepare_yielding(&quelle, 400, 400, 85, 0, 0).unwrap();
+
+        assert_eq!((thread.width, thread.height), (direkt.width, direkt.height));
+        assert_eq!(thread.bytes, direkt.bytes);
+        assert_eq!(
+            (inplace.width, inplace.height),
+            (direkt.width, direkt.height)
+        );
+        assert_eq!(inplace.bytes, direkt.bytes);
+    }
+
+    /// `prepare_yielding` darf ohne mehrfaedige Laufzeit nicht panicen.
+    ///
+    /// `#[tokio::test]` legt ohne Angabe eine **einfaedige** Laufzeit an, und
+    /// `block_in_place` paniciert dort. Genau dieser Test faellt weg, wenn
+    /// jemand die Abfrage in `prepare_yielding` fuer ueberfluessig haelt.
+    #[tokio::test]
+    async fn aufbereitung_paniciert_nicht_auf_einfaediger_laufzeit_e_43() {
+        let quelle = test_jpeg(200, 200);
+        assert!(prepare_yielding(&quelle, 100, 100, 85, 0, 0).is_ok());
+    }
+
+    /// Auch ganz ohne Laufzeit — der Schreibtisch-Bau ruft `ingest_local`
+    /// synchron.
+    #[test]
+    fn aufbereitung_laeuft_auch_ohne_laufzeit_e_43() {
+        let quelle = test_jpeg(200, 200);
+        assert!(prepare_yielding(&quelle, 100, 100, 85, 0, 0).is_ok());
+    }
+
     use image::{Rgb, RgbImage};
 
     #[test]
@@ -305,7 +412,11 @@ mod tests {
         let src = test_jpeg(1920, 1080);
         let thumb = thumbnail(&src, THUMB_EDGE).expect("Vorschaubild");
         let img = image::load_from_memory(&thumb).unwrap();
-        assert_eq!(img.width(), THUMB_EDGE, "lange Kante liegt auf dem Zielmass");
+        assert_eq!(
+            img.width(),
+            THUMB_EDGE,
+            "lange Kante liegt auf dem Zielmass"
+        );
         assert_eq!(img.height(), 180, "Seitenverhaeltnis bleibt erhalten");
     }
 
@@ -577,7 +688,9 @@ mod tests {
         // Rot ist das erste Einzelbild. Kaeme Gruen an, laege die Bewegung
         // vor dem Standbild -- und die Diashow zeigte etwas anderes als die
         // Vorschau im Mailprogramm.
-        let zurueck = image::load_from_memory(&p.bytes).expect("Ausgabe lesbar").to_rgb8();
+        let zurueck = image::load_from_memory(&p.bytes)
+            .expect("Ausgabe lesbar")
+            .to_rgb8();
         let mitte = zurueck.get_pixel(30, 20);
         assert!(
             mitte[0] > 150 && mitte[1] < 100,
@@ -602,7 +715,13 @@ mod tests {
     fn haelt_die_gesperrten_formate_weiter_draussen() {
         // Gegenprobe zu E-37: GIF ist herausgenommen worden, E-04 und E-07
         // gelten unveraendert.
-        for name in ["oma.heic", "urlaub.HEIF", "clip.mp4", "clip.mov", "foto.avif"] {
+        for name in [
+            "oma.heic",
+            "urlaub.HEIF",
+            "clip.mp4",
+            "clip.mov",
+            "foto.avif",
+        ] {
             assert_eq!(classify(name), FileClass::Skipped, "{name}");
         }
     }

@@ -43,6 +43,9 @@ axum                = { version = "0.8", default-features = false, features = ["
 # MQTT-Client, reines Rust — laeuft damit ohne C-Cross-Compile auf Android.
 rumqttc             = { version = "0.24", default-features = false }
 tokio               = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "net"] }
+# Nur fuer `join_all` beim Abgleich mehrerer Quellen (E-43). Steht ueber
+# reqwest und async-imap ohnehin schon im Baum — kostet also kein Byte im APK.
+futures-util        = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 
 # Verschluesselung der Zugangsdaten (NF-05). Reines Rust, kein C-Cross-Compile.
 aes-gcm             = "0.10"

@@ -44,6 +44,34 @@ beforeEach(() => {
   vi.spyOn(api, 'storageBreakdown').mockResolvedValue({ byYear: [], bySender: [] })
   vi.spyOn(api, 'hasMqttPassword').mockResolvedValue(false)
   vi.spyOn(api, 'mqttStatus').mockResolvedValue({ connected: false, lastError: null } as never)
+  vi.spyOn(api, 'appVersion').mockResolvedValue('1.0.0')
+})
+
+/**
+ * Die angezeigte Fassung.
+ *
+ * Hier stand eine feste Zeichenkette `0.1.0`, waehrend `package.json`,
+ * `Cargo.toml` und `tauri.conf.json` laengst auf 1.0.0 standen. Wer eine
+ * Fehlermeldung schickt, liest die Zahl aus dieser Zeile ab — eine falsche
+ * schickt die Fehlersuche in die Irre, und auffallen kann es niemandem, weil
+ * nichts sie mit dem Bau verbindet.
+ */
+describe('Fassung', () => {
+  it('zeigt die Fassung des laufenden Baus', async () => {
+    vi.spyOn(api, 'appVersion').mockResolvedValue('2.3.4')
+
+    const w = setup()
+    await vi.waitFor(() => expect(w.text()).toContain('Version 2.3.4'))
+  })
+
+  it('schreibt keine Fassung hin, solange keine bekannt ist', async () => {
+    // Lieber gar nichts als eine Platzhalterzahl: eine angezeigte Version, die
+    // von nichts abhaengt, ist genau der Fehler von vorher.
+    vi.spyOn(api, 'appVersion').mockRejectedValue(new Error('Brücke weg'))
+
+    const w = setup()
+    await vi.waitFor(() => expect(w.text()).not.toContain('Version'))
+  })
 })
 
 /** Findet einen Knopf ueber seine Beschriftung. */

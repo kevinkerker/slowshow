@@ -197,14 +197,18 @@ pub async fn sync_source(
         };
 
         // NF-13: Dekodierung und Skalierung im Rust-Prozess, nicht in der WebView.
-        let prepared = match decode::prepare(
-            &bytes,
+        // Auf einem Arbeitsthread, damit die Rechenarbeit nicht den Async-Lauf
+        // belegt, auf dem auch die zweite Quelle und die Anzeige haengen (E-43).
+        let prepared = match decode::prepare_off_thread(
+            bytes,
             cfg.target_width,
             cfg.target_height,
             cfg.jpeg_quality,
             source.min_width,
             source.min_height,
-        ) {
+        )
+        .await
+        {
             Ok(p) => p,
             Err(DecodeError::Unsupported(what)) => {
                 log::info!("'{}': {} übersprungen ({what})", source.name, file.rel_path);

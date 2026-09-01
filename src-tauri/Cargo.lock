@@ -3921,6 +3921,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "futures",
+ "futures-util",
  "getrandom 0.2.17",
  "image",
  "jni",

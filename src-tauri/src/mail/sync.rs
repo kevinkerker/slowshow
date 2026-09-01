@@ -295,7 +295,11 @@ fn store_mail(
     let mut skipped = mail.skipped.len();
 
     for (nr, photo) in mail.photos.iter().enumerate() {
-        let prepared = match decode::prepare(
+        // `store_mail` haengt in einem *synchronen* Rueckruf des IMAP-Abrufs;
+        // ein Arbeitsthread wie bei den uebrigen Quellen ginge hier nur mit
+        // einem async-Rueckruf durch das ganze Modul. `prepare_yielding` meldet
+        // die Rechenarbeit stattdessen bei der Laufzeit an (E-43).
+        let prepared = match decode::prepare_yielding(
             &photo.bytes,
             target_w,
             target_h,

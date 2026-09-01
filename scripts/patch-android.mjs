@@ -32,6 +32,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { SIGN_MARKER, keystoreIssue, withSigningConfig } from './lib/android-signing.mjs'
+import { withRenderProcessGuard } from './lib/android-webview.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const srcDir = resolve(root, 'src-tauri/android-src')
@@ -62,6 +63,33 @@ for (const file of kotlinFiles) {
 }
 const activityTarget = resolve(javaDir, 'MainActivity.kt')
 console.log(`${kotlinFiles.length} Kotlin-Datei(en) eingespielt: ${kotlinFiles.join(', ')}`)
+
+// ── 1b. Absturzschutz der WebView ────────────────────────────────────────────
+//
+// Siehe scripts/lib/android-webview.mjs: `onRenderProcessGone` gehoert in den
+// erzeugten RustWebViewClient, weil er sich weder beerben noch ersetzen laesst.
+
+const clientPath = resolve(javaDir, 'generated/RustWebViewClient.kt')
+if (!existsSync(clientPath)) {
+  console.error('generated/RustWebViewClient.kt fehlt — ist `tauri android init` durchgelaufen?')
+  process.exit(1)
+}
+
+let guard
+try {
+  guard = withRenderProcessGuard(readFileSync(clientPath, 'utf8'))
+} catch (e) {
+  // Laut abbrechen statt weiterzumachen: ein still uebersprungener Eingriff
+  // faellt erst nach Tagen Dauerbetrieb auf, und dann als schwarzer Schirm.
+  console.error(e.message)
+  process.exit(1)
+}
+if (guard.changed) {
+  writeFileSync(clientPath, guard.text, 'utf8')
+  console.log('RustWebViewClient.kt: Absturzschutz der WebView eingespielt (R-03)')
+} else {
+  console.log('RustWebViewClient.kt: Absturzschutz steht bereits')
+}
 
 // ── 2. AndroidManifest ───────────────────────────────────────────────────────
 

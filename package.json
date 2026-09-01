@@ -19,6 +19,7 @@
     "android:deploy:arm64": "powershell -ExecutionPolicy Bypass -File ./deploy-android.ps1 -dev -arm64",
     "licenses": "node scripts/third-party-licenses.mjs",
     "icons": "node scripts/generate-icon.mjs",
+    "bump": "node scripts/bump.mjs",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",

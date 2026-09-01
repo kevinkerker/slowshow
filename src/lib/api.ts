@@ -87,6 +87,34 @@ export const setFrameOrientation = (portrait: boolean): Promise<void> =>
 export const applyOrientation = (): Promise<void> => invoke('apply_orientation')
 
 /**
+ * Meldet dem Backend die Displaygröße in echten Pixeln (NF-12, R-03).
+ *
+ * `screen` liefert CSS-Pixel; erst mal `devicePixelRatio` ergibt die
+ * Auflösung, in der das Bild wirklich landet. Das Backend deckelt damit die
+ * Zielgröße beim Aufbereiten — ein Foto größer als der Schirm kostet die
+ * WebView Speicher, den niemand sieht.
+ *
+ * Einmal beim Start: die Displaygröße ändert sich nicht, und die Ausrichtung
+ * wandert ohnehin über `setFrameOrientation`.
+ */
+/**
+ * Fassung der laufenden App.
+ *
+ * Aus dem Backend und nicht aus `package.json`: maßgeblich ist, was auf dem
+ * Gerät installiert ist. Eine im Frontend eingetragene Zahl wäre eine vierte
+ * Stelle, an der eine Versionsnummer steht — und die erste, die vergessen wird.
+ */
+export const appVersion = (): Promise<string> => invoke('app_version')
+
+export function reportDisplaySize(): Promise<void> {
+  const ratio = window.devicePixelRatio || 1
+  return invoke('set_display_size', {
+    width: Math.round(window.screen.width * ratio),
+    height: Math.round(window.screen.height * ratio),
+  })
+}
+
+/**
  * Gibt ein Foto aus der Quarantäne frei (F4, E-31).
  *
  * `trustSender` nimmt den Absender dauerhaft in die Freigabeliste und holt

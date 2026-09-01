@@ -11,7 +11,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useConfigStore } from '@/stores/config'
 import { keepAwake, releaseAwake } from '@/lib/wake'
 import { dimOpacity as computeDim } from '@/lib/dim'
-import { applyOrientation, setFrameOrientation } from '@/lib/api'
+import { applyOrientation, reportDisplaySize, setFrameOrientation } from '@/lib/api'
 
 const store = useConfigStore()
 const loaded = ref(false)
@@ -49,6 +49,9 @@ onMounted(async () => {
   // herauskam — in der anderen Reihenfolge meldeten wir die alte Lage.
   await applyOrientation()
   reportOrientation()
+  // Displaygröße einmalig melden, damit das Backend Fotos nicht größer
+  // aufbereitet als der Schirm (NF-12, R-03).
+  void reportDisplaySize()
   portraitQuery.addEventListener('change', reportOrientation)
   await keepAwake()
 })

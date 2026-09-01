@@ -57,8 +57,11 @@ export const useSlideshowStore = defineStore('slideshow', () => {
     unlisten.push(
       await listen<Slide | null>(EVENTS.slide, async (e) => {
         slide.value = e.payload
-        await refreshInfo()
+        // Vor dem Nachladen der Metadaten: die Anzeigedauer läuft ab dem
+        // Bildwechsel, und ein Fehler beim Nachladen darf den Takt nicht
+        // mitnehmen.
         restartTimer()
+        await refreshInfo()
       }),
     )
     // Waehrend eines Syncs: sobald das erste Bild im Cache liegt, anzeigen,
@@ -109,12 +112,22 @@ export const useSlideshowStore = defineStore('slideshow', () => {
     if (timer) clearTimeout(timer)
     timer = setTimeout(
       async () => {
-        if (playing.value && activeGetter()) {
-          await next()
-        } else {
+        if (!playing.value || !activeGetter()) {
           // Pausiert oder außerhalb der Aktivzeit: weiter takten, aber nicht
           // weiterschalten — sonst müsste beim Fortsetzen erst ein voller
           // Zyklus abgewartet werden.
+          restartTimer()
+          return
+        }
+        try {
+          await next()
+        } catch (e) {
+          // Ohne dieses Auffangen nimmt ein einzelner fehlgeschlagener Aufruf
+          // den Taktgeber mit: `next` setzt ihn erst am Ende neu, und die
+          // Diashow stünde ab da endgültig still. Auf einem Rahmen, der
+          // wochenlang läuft, ist ein Fehlschlag kein Randfall (NF-02) —
+          // aussehen würde es wie ein hängender Rahmen.
+          console.error('Bildwechsel fehlgeschlagen', e)
           restartTimer()
         }
       },

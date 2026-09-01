@@ -33,8 +33,22 @@ const mqttReconnecting = ref(false)
 const mqtt = ref<MqttStatus>({ running: false, connected: false, lastError: null })
 let unlistenMqtt: UnlistenFn | null = null
 
+/**
+ * Fassung der laufenden App.
+ *
+ * Aus dem Backend statt als feste Zeichenkette: hier stand `0.1.0`, waehrend
+ * Paket, Cargo-Manifest und `tauri.conf.json` laengst auf 1.0.0 standen. Wer
+ * eine Fehlermeldung schickt, nennt darin die Fassung aus dieser Zeile — eine
+ * falsche schickt die Fehlersuche in die Irre.
+ *
+ * Leer, bis die Antwort da ist: eine Platzhalterzahl waere wieder eine
+ * Versionsnummer, die von nichts abhaengt.
+ */
+const version = ref('')
+
 onMounted(async () => {
   void loadBreakdown()
+  version.value = await api.appVersion().catch(() => '')
   mqttHasPassword.value = await api.hasMqttPassword().catch(() => false)
   mqtt.value = await api.mqttStatus().catch(() => mqtt.value)
   unlistenMqtt = await listen<MqttStatus>(EVENTS.mqtt, (e) => {
@@ -531,7 +545,7 @@ async function importConfig() {
 
     <section class="about">
       <div class="ss-wordmark">{{ t('app.name') }}</div>
-      <p class="dim">{{ t('system.version', { version: '0.1.0' }) }}</p>
+      <p v-if="version" class="dim">{{ t('system.version', { version }) }}</p>
       <p class="dim">{{ t('system.license') }}</p>
     </section>
   </div>
