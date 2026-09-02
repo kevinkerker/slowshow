@@ -309,6 +309,8 @@
     "imported": "Konfiguration übernommen — Passwörter bitte neu eingeben.",
     "importFailed": "Import fehlgeschlagen: {error}",
     "about": "Über Slowshow",
+    "longRun": "Dauerbetrieb",
+    "longRunHint": "Wird das Tablet zwischendurch für etwas anderes benutzt – Kamera, Videoanruf, eine andere App –, kann Android den Rahmen im Hintergrund beenden. Er startet dann nicht von selbst neu: danach Slowshow einmal antippen.",
     "version": "Version {version}",
     "license": "Apache-Lizenz 2.0 · Open Source",
     "mqtt": "MQTT (Home Assistant)",

@@ -38,6 +38,15 @@ export const useConfigStore = defineStore('config', () => {
    */
   const progress = ref<Record<string, SyncProgress>>({})
   const error = ref<string | null>(null)
+  /**
+   * Letzter Fehler je Quelle, bis der nächste Lauf dieser Quelle gelingt.
+   *
+   * Vorher gab es nur `error` für den zuletzt von Hand angestoßenen Lauf und
+   * einen Hinweis, der nach sechs Sekunden verschwand. Ein Ordner ohne
+   * Freigabe (E-40) sah danach aus wie ein leerer Ordner. Der Hintergrund-Sync
+   * füllt das hier beim Start neu — der Zustand braucht also keine Datei.
+   */
+  const errors = ref<Record<string, string>>({})
 
   const sources = computed(() => config.value?.sources ?? [])
 
@@ -56,6 +65,17 @@ export const useConfigStore = defineStore('config', () => {
   /** Zwischenstand dieser Quelle, falls einer vorliegt. */
   function progressFor(id: string): SyncProgress | null {
     return progress.value[id] ?? null
+  }
+
+  /** Fehler des letzten Laufs dieser Quelle, oder `null`, wenn er gelang. */
+  function errorFor(id: string): string | null {
+    return errors.value[id] ?? null
+  }
+
+  /** Merkt Erfolg oder Fehler eines Berichts für seine Quelle. */
+  function noteReport(report: SyncReport) {
+    if (report.error) errors.value[report.sourceId] = report.error
+    else delete errors.value[report.sourceId]
   }
 
   const ready = computed(() => config.value !== null)
@@ -82,6 +102,7 @@ export const useConfigStore = defineStore('config', () => {
     unlisten.push(
       await listen<SyncReport>(EVENTS.sync, (e) => {
         lastReport.value = e.payload
+        noteReport(e.payload)
         // Nur den Zwischenstand dieser Quelle wegräumen: eine zweite kann
         // weiterlaufen, und ihr Balken darf davon nicht verschwinden (E-43).
         delete progress.value[e.payload.sourceId]
@@ -193,6 +214,7 @@ export const useConfigStore = defineStore('config', () => {
     sources,
     isSyncing,
     progressFor,
+    errorFor,
     ready,
     load,
     dispose,

@@ -543,6 +543,16 @@ async function importConfig() {
       <p v-if="notice" class="notice">{{ notice }}</p>
     </section>
 
+    <!-- E-45: Der Rahmen wird von Android abgeraeumt, sobald er nicht mehr im
+         Vordergrund ist -- Kamera, Videoanruf, eine andere App. Am Geraet
+         gemessen, dreimal an einem Tag. Beschlossen wurde, das Verhalten zu
+         belassen und es hier zu sagen, statt es jemanden vor einem dunklen
+         Rahmen selbst herausfinden zu lassen. Reine Anzeige, keine Logik. -->
+    <section>
+      <h3 class="ss-label">{{ t('system.longRun') }}</h3>
+      <p class="dim">{{ t('system.longRunHint') }}</p>
+    </section>
+
     <section class="about">
       <div class="ss-wordmark">{{ t('app.name') }}</div>
       <p v-if="version" class="dim">{{ t('system.version', { version }) }}</p>

@@ -27,6 +27,17 @@ const MAX_DEPTH: usize = 8;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 const MAX_FILES: usize = 50_000;
 
+/// Fehler fuer eine unlesbare Wurzel der Ordnerfreigabe (E-40, E-45).
+///
+/// Vorher lief das als leerer Ordner durch: 0 Bilder, Erfolg, `last_sync`
+/// gestempelt — und die Karte schwieg. Am Geraet nach der Neuinstallation
+/// gemessen, mit genau der Meldung, die hier als Ursache angehaengt wird.
+pub fn root_unreadable(cause: &str) -> DavError {
+    DavError::Access(format!(
+        "Ordnerfreigabe fehlt oder Ordner nicht erreichbar — unter „Bearbeiten“ den Ordner neu auswählen ({cause})"
+    ))
+}
+
 #[cfg(target_os = "android")]
 mod imp {
     use super::*;
@@ -112,8 +123,13 @@ mod imp {
             let entries = match fs.read_dir(&uri) {
                 Ok(e) => e,
                 Err(e) => {
-                    // Ein unlesbarer Unterordner darf den ganzen Lauf nicht
-                    // scheitern lassen — der Rest wird trotzdem übernommen.
+                    // Die Wurzel selbst: ohne sie gibt es nichts zu listen, und
+                    // ein leerer Erfolg verschleierte die fehlende Freigabe
+                    // (E-40). Ein unlesbarer *Unterordner* dagegen darf den
+                    // Lauf nicht scheitern lassen — der Rest wird uebernommen.
+                    if prefix.is_empty() {
+                        return Err(super::root_unreadable(&e.to_string()));
+                    }
                     log::warn!("Ordner '{prefix}' nicht lesbar: {e}");
                     continue;
                 }
@@ -216,6 +232,17 @@ pub use imp::LocalClient;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unlesbare_wurzel_nennt_die_freigabe_und_den_weg_e_40() {
+        // Der Android-Zweig von `walk` laeuft nur mit dem SAF-Plugin auf dem
+        // Geraet; pruefbar ist hier die Meldung, die er zurueckgibt.
+        let e = root_unreadable("No directory or permission");
+        let text = e.to_string();
+        assert!(text.contains("Ordnerfreigabe fehlt"), "{text}");
+        assert!(text.contains("Bearbeiten"), "der Weg zur Behebung steht dabei");
+        assert!(text.contains("No directory or permission"), "die Ursache bleibt lesbar");
+    }
 
     #[test]
     fn grenzen_entsprechen_den_entfernten_quellen() {

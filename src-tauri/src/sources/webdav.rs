@@ -19,6 +19,11 @@ pub enum DavError {
     Xml(String),
     #[error("Ungültige Adresse: {0}")]
     Url(String),
+    /// Der Zugriff auf die Quelle ist weg — bei lokalen Ordnern die
+    /// SAF-Freigabe nach einer Neuinstallation (E-40, E-45). Der Text ist
+    /// fertig fuer die Quellenkarte formuliert.
+    #[error("{0}")]
+    Access(String),
 }
 
 /// Ein Eintrag aus einer PROPFIND-Antwort.

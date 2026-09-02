@@ -194,6 +194,20 @@ describe('configStore: Fortschritt mehrerer Quellen', () => {
     expect(store.progressFor('b')?.done, 'b laeuft weiter').toBe(7)
   })
 
+  it('merkt den Fehler einer Quelle, bis ihr naechster Lauf gelingt', async () => {
+    // E-40: ein Ordner ohne Freigabe meldete sich nur als kurzer Hinweis nach
+    // einem manuellen Lauf — der Hintergrundlauf blieb stumm, die Karte auch.
+    const store = await geladen()
+    const sync = rueckruf(EVENTS.sync)
+
+    sync({ payload: { sourceId: 'a', error: 'Ordnerfreigabe fehlt' } as SyncReport })
+    expect(store.errorFor('a')).toBe('Ordnerfreigabe fehlt')
+    expect(store.errorFor('b'), 'andere Quellen bleiben unberuehrt').toBeNull()
+
+    sync({ payload: { sourceId: 'a', error: null } as SyncReport })
+    expect(store.errorFor('a'), 'ein gelungener Lauf raeumt auf').toBeNull()
+  })
+
   it('zeigt auch einen Hintergrundlauf als laufend an', async () => {
     // `syncing` kennt nur selbst ausgeloeste Laeufe. Ohne den Rueckfall auf den
     // Fortschritt liefe ein Abgleich des Zeitgebers unsichtbar.

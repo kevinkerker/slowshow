@@ -142,6 +142,7 @@ function describe(report: SyncReport | null): string {
         :photo-count="store.counts[source.id] ?? 0"
         :syncing="store.isSyncing(source.id)"
         :progress="store.progressFor(source.id)"
+        :error="store.errorFor(source.id)"
         @toggle="(v) => toggle(source, v)"
         @edit="openEdit(source)"
         @sync="sync(source)"

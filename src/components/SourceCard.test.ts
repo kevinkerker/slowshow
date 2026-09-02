@@ -140,3 +140,49 @@ describe('SourceCard', () => {
     expect(text).not.toContain('noch nie')
   })
 })
+
+/**
+ * Der dauerhafte Fehler an der Karte (E-40).
+ *
+ * Ein lokaler Ordner ohne Freigabe lief als leerer Ordner mit 0 Bildern durch;
+ * die Karte sagte nichts. Jetzt steht der Fehler des letzten Laufs unter der
+ * Statuszeile — und verschwindet, sobald ein Lauf gelingt oder einer laeuft.
+ */
+describe('SourceCard: Fehler des letzten Laufs', () => {
+  const quelle = {
+    id: 'l1',
+    name: 'Urlaub',
+    kind: KINDS.local,
+    enabled: true,
+    subfolders: [],
+    minWidth: 0,
+    minHeight: 0,
+    syncIntervalMinutes: 360,
+    lastSync: null,
+  } as unknown as Source
+
+  function karte(props: Record<string, unknown>) {
+    return mount(SourceCard, {
+      props: { source: quelle, photoCount: 0, syncing: false, ...props },
+      global: { plugins: [i18n] },
+    })
+  }
+
+  it('zeigt den Fehler dauerhaft unter dem Status', () => {
+    const w = karte({ error: 'Ordnerfreigabe fehlt oder Ordner nicht erreichbar' })
+    expect(w.find('.status-error').exists()).toBe(true)
+    expect(w.text()).toContain('Ordnerfreigabe fehlt')
+  })
+
+  it('zeigt ohne Fehler keine Zeile', () => {
+    const w = karte({ error: null })
+    expect(w.find('.status-error').exists()).toBe(false)
+  })
+
+  it('blendet den Fehler aus, solange ein neuer Lauf laeuft', () => {
+    // Der alte Fehler ist waehrend eines Laufs keine Aussage mehr; der
+    // Fortschrittsbalken ist es.
+    const w = karte({ error: 'Ordnerfreigabe fehlt', syncing: true })
+    expect(w.find('.status-error').exists()).toBe(false)
+  })
+})

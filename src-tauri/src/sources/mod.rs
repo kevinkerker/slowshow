@@ -206,6 +206,16 @@ impl RemoteClient {
     ///
     /// Nextcloud nutzt dabei die Preview-API (E-03), WebDAV lädt das Original,
     /// lokale Ordner lesen über SAF.
+    /// Liefert `fetch` die Originaldatei, sodass ihre Laenge mit der
+    /// Auflistung uebereinstimmen muss? Nextcloud holt bevorzugt eine
+    /// Vorschau in Zielgroesse (E-03) — deren Laenge ist eine andere.
+    pub fn delivers_original(&self) -> bool {
+        match self {
+            Self::Local(_) | Self::WebDav(_) => true,
+            Self::Nextcloud(c) => !c.uses_preview_api(),
+        }
+    }
+
     pub async fn fetch(
         &self,
         file: &RemoteFile,

@@ -196,6 +196,24 @@ pub async fn sync_source(
             }
         };
 
+        // Laenge gegen die Auflistung pruefen, bevor dekodiert wird. Ein
+        // abgebrochener Download hiess vorher "nicht dekodierbar": der Fehler
+        // stand beim Bild statt beim Netz, und erst der Decoder fand ihn —
+        // gemessen an einem Panorama mit 15 131 von 65 383 Bytes (E-45). Als
+        // Fehlschlag gezaehlt bleibt die Datei ausserhalb des Index und wird
+        // beim naechsten Lauf erneut geholt.
+        if client.delivers_original() && !transfer_complete(file.size, bytes.len()) {
+            log::warn!(
+                "'{}': {} unvollstaendig uebertragen: {} von {} Bytes",
+                source.name,
+                file.rel_path,
+                bytes.len(),
+                file.size.unwrap_or(0)
+            );
+            report.failed += 1;
+            continue;
+        }
+
         // NF-13: Dekodierung und Skalierung im Rust-Prozess, nicht in der WebView.
         // Auf einem Arbeitsthread, damit die Rechenarbeit nicht den Async-Lauf
         // belegt, auf dem auch die zweite Quelle und die Anzeige haengen (E-43).
@@ -305,6 +323,19 @@ pub async fn sync_source(
     report
 }
 
+/// Ist eine Uebertragung vollstaendig angekommen?
+///
+/// Ohne bekannte Groesse — und bei einer gemeldeten Null, wie sie manche
+/// WebDAV-Server fuer externe Speicher liefern — gilt sie als vollstaendig;
+/// dann bleibt der Decoder die einzige Pruefung. Sonst landete eine Datei mit
+/// falsch gemeldeter Groesse nie im Cache.
+pub fn transfer_complete(expected: Option<u64>, got: usize) -> bool {
+    match expected {
+        Some(n) if n > 0 => n == got as u64,
+        _ => true,
+    }
+}
+
 /// Nimmt ein Bild einer lokalen SAF-Quelle entgegen (FA-20).
 ///
 /// Wird vom Frontend aufgerufen, weil das Storage Access Framework nur über die
@@ -400,6 +431,21 @@ mod tests {
             height: 1080,
             taken_at: None,
         }
+    }
+
+    #[test]
+    fn abgeschnittene_uebertragung_faellt_vor_dem_dekodieren_auf_e_45() {
+        // Das Panorama vom Geraet: 15 131 von 65 383 Bytes.
+        assert!(!transfer_complete(Some(65_383), 15_131));
+        assert!(transfer_complete(Some(65_383), 65_383));
+    }
+
+    #[test]
+    fn uebertragung_gilt_ohne_verlaessliche_groesse_als_vollstaendig() {
+        // Sonst landete eine Datei mit unbekannter oder als 0 gemeldeter
+        // Groesse nie im Cache.
+        assert!(transfer_complete(None, 4_096));
+        assert!(transfer_complete(Some(0), 4_096));
     }
 
     #[test]

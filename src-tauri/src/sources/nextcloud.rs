@@ -119,6 +119,12 @@ impl NextcloudClient {
     /// ist oder keine `fileid` geliefert wurde. Für HEIC-Originale ist der
     /// Rückfall wirkungslos — die Datei wird dann beim Dekodieren verworfen
     /// und protokolliert (FA-09).
+    /// Holt `fetch` bevorzugt eine Vorschau statt des Originals? Dann sagt
+    /// die Laenge der Antwort nichts ueber die gelistete Dateigroesse.
+    pub fn uses_preview_api(&self) -> bool {
+        self.use_preview_api
+    }
+
     pub async fn fetch(
         &self,
         entry: &DavEntry,

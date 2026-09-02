@@ -18,6 +18,15 @@ const props = defineProps<{
   syncingPath?: string
   /** Zwischenstand, wenn diese Quelle gerade laeuft. */
   progress?: SyncProgress | null
+  /**
+   * Fehler des letzten Laufs, bis der naechste gelingt.
+   *
+   * Steht dauerhaft unter der Statuszeile statt als Hinweis, der nach
+   * Sekunden verschwindet: der Fall, um den es geht — eine Ordnerfreigabe,
+   * die nach der Neuinstallation fehlt (E-40) — faellt sonst erst auf, wenn
+   * jemand sich wundert, warum ein Ordner leer bleibt.
+   */
+  error?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -161,6 +170,7 @@ const iconPath = computed(() => {
     <div class="body">
       <div class="name">{{ source.name }}</div>
       <div class="status">{{ status }}</div>
+      <div v-if="error && !syncing" class="status-error">{{ error }}</div>
       <!-- Schmaler Balken statt Zahlenkolonne: zeigt auf einen Blick, ob es
            vorangeht (der eigentliche Zweck waehrend eines langen Laufs). -->
       <div v-if="syncing" class="progress">
@@ -209,6 +219,12 @@ const iconPath = computed(() => {
 </template>
 
 <style scoped>
+.status-error {
+  margin-top: 4px;
+  font-size: 0.85rem;
+  color: var(--ss-error);
+}
+
 .card {
   display: flex;
   align-items: center;

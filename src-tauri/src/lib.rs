@@ -68,6 +68,23 @@ fn still_running() -> bool {
 #[derive(Default)]
 struct BackgroundTasks(std::sync::Mutex<Vec<tauri::async_runtime::JoinHandle<()>>>);
 
+/// Groesse einer Logdatei, bevor rotiert wird (E-45).
+///
+/// Zwei Megabyte sind bei rund 100 Byte je Zeile etwa 20 000 Zeilen — im
+/// ruhigen Betrieb Wochen, waehrend eines grossen Abgleichs Tage.
+const LOG_MAX_FILE_BYTES: u128 = 2_000_000;
+/// Wie viele rotierte Logdateien liegen bleiben. Drei mal zwei Megabyte sind
+/// auf einem Tablet nichts, decken aber jeden Siebentagetest ab.
+const LOG_KEEP_FILES: usize = 3;
+
+/// Eine Logzeile: `2026-09-02 20:39:51+0200 [INFO] slowshow_lib::sync: Text`.
+///
+/// Als eigene Funktion, damit die Form pruefbar ist — das Plugin selbst laesst
+/// sich im Test nicht laden.
+fn log_line(now: &str, level: log::Level, target: &str, message: &std::fmt::Arguments) -> String {
+    format!("{now} [{level}] {target}: {message}")
+}
+
 /// Wie oft der Zeitgeber prüft, ob eine Quelle synchronisiert werden muss (FA-28).
 const SYNC_TICK: Duration = Duration::from_secs(60);
 /// Wie oft Zeitplan und Helligkeit ausgewertet werden (FA-52–54).
@@ -98,6 +115,29 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
+                // Zeitstempel je Zeile (E-45). Auf Android schreibt das Plugin
+                // von sich aus nur `[Ziel] Text` — im Logcat steht die Zeit
+                // davor, in der Datei nicht. Die Datei ist aber das, was man
+                // nach einem Ausfall per adb holt; ohne Zeit liess sich der
+                // Abriss des Logs keinem Ereignis zuordnen. Mit Zeitzonen-
+                // versatz, weil `chrono::Local` auf Android auf UTC
+                // zurueckfallen kann: `+0000` sagt dann ehrlich, was es ist.
+                .format(|out, message, record| {
+                    out.finish(format_args!(
+                        "{}",
+                        log_line(
+                            &chrono::Local::now().format("%Y-%m-%d %H:%M:%S%z").to_string(),
+                            record.level(),
+                            record.target(),
+                            message,
+                        )
+                    ))
+                })
+                // 40 KB und eine einzige Datei (Vorgabe) reichten fuer knapp
+                // zwei Stunden Takt. Der Siebentagetest aus Abschnitt 5.2
+                // braucht Tage.
+                .max_file_size(LOG_MAX_FILE_BYTES)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(LOG_KEEP_FILES))
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
@@ -404,6 +444,22 @@ mod tests {
     ///
     /// Der Test ist der einzige, der die Marke anfasst, und setzt sie am Ende
     /// zurueck; sonst faerbte er andere Tests im selben Prozess ein.
+    #[test]
+    fn logzeile_traegt_zeit_stufe_und_ziel_e_45() {
+        // Der Abriss eines Logs muss sich einem Ereignis zuordnen lassen —
+        // dafuer steht die Zeit vorn, mit Versatz, und die Stufe zum Filtern.
+        let zeile = log_line(
+            "2026-09-02 20:39:51+0200",
+            log::Level::Warn,
+            "slowshow_lib::sync",
+            &format_args!("'{}': {} Bilder", "USA", 6402),
+        );
+        assert_eq!(
+            zeile,
+            "2026-09-02 20:39:51+0200 [WARN] slowshow_lib::sync: 'USA': 6402 Bilder"
+        );
+    }
+
     #[test]
     fn abbruchsignal_haelt_die_schleifen_an() {
         assert!(still_running(), "vor dem Beenden laufen die Schleifen");
