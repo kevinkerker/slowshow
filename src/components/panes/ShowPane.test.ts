@@ -65,6 +65,7 @@ const CONFIG = {
   brightness: { level: 40, autoDim: false, dimFrom: '20:00', dimLevel: 15, deviceControlled: false },
   cache: { maxBytes: 1, prefetchCount: 5, targetWidth: 2560, targetHeight: 1600, jpegQuality: 85 },
   remote: { enabled: false, port: 8127, token: '' },
+  upnp: { enabled: false, port: 8128, udn: 'uuid:test', friendlyName: 'Slowshow' },
   mqtt: {
     enabled: false,
     host: '',

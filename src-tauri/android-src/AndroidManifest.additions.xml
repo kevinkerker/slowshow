@@ -19,6 +19,12 @@
          einen Sync zu starten — die Diashow läuft dann aus dem Cache (FA-26). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Multicast empfangen, damit Home Assistant den Rahmen per SSDP findet
+         (E-47). Ohne dieses Recht verwirft das WLAN die Suchanfragen. Kein
+         heikles Recht: es erlaubt nur, Pakete anzunehmen, die ohnehin im
+         eigenen Netz kreisen. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
     <!-- Bewusst **kein** Vordergrunddienst mehr (E-38). Der Rahmen laeuft mit
          sichtbarer Activity; eine App in diesem Zustand raeumt Android nicht
          wegen Speicherdrucks ab. Damit entfallen FOREGROUND_SERVICE,

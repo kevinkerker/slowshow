@@ -43,6 +43,9 @@ axum                = { version = "0.8", default-features = false, features = ["
 # MQTT-Client, reines Rust — laeuft damit ohne C-Cross-Compile auf Android.
 rumqttc             = { version = "0.24", default-features = false }
 tokio               = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "net"] }
+# SSDP (E-47): Port 1900 mit anderen UPnP-Programmen teilen und der
+# Multicast-Gruppe beitreten — beides kann tokio allein nicht.
+socket2             = "0.6"
 # Nur fuer `join_all` beim Abgleich mehrerer Quellen (E-43). Steht ueber
 # reqwest und async-imap ohnehin schon im Baum — kostet also kein Byte im APK.
 futures-util        = { version = "0.3", default-features = false, features = ["std", "async-await"] }
@@ -84,3 +87,8 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# Nur fuer die Tests: `Router::oneshot` in den UPnP-Tests kommt aus `tower::ServiceExt`.
+# tower steht ueber axum ohnehin im Baum -- kostet also kein Byte im APK.
+[dev-dependencies]
+tower               = { version = "0.5", features = ["util"] }

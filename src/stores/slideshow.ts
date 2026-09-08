@@ -120,7 +120,10 @@ export const useSlideshowStore = defineStore('slideshow', () => {
           return
         }
         try {
-          await next()
+          // Der Takt ist keine Geste: ein Fremdbild aus Home Assistant (E-52)
+          // bleibt haengen, bis jemand weiterschaltet — das Backend gibt dem
+          // Takt dann dasselbe Bild zurueck.
+          await step(false)
         } catch (e) {
           // Ohne dieses Auffangen nimmt ein einzelner fehlgeschlagener Aufruf
           // den Taktgeber mit: `next` setzt ihn erst am Ende neu, und die
@@ -135,16 +138,22 @@ export const useSlideshowStore = defineStore('slideshow', () => {
     )
   }
 
-  async function next() {
-    slide.value = await api.nextSlide()
+  /** Weiterschalten; `manual` heisst Geste oder Knopf, sonst Taktgeber. */
+  async function step(manual: boolean) {
+    slide.value = await api.nextSlide(manual)
     await refreshInfo()
-    // Nach einem Wechsel von Hand beginnt die volle Anzeigedauer neu.
+    // Nach einem Wechsel beginnt die volle Anzeigedauer neu.
     restartTimer()
     await prefetch()
   }
 
+  /** Naechstes Bild von Hand (FA-41). Beendet ein Fremdbild (E-52). */
+  async function next() {
+    await step(true)
+  }
+
   async function prev() {
-    slide.value = await api.prevSlide()
+    slide.value = await api.prevSlide(true)
     await refreshInfo()
     restartTimer()
     await prefetch()

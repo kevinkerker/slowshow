@@ -53,7 +53,16 @@ impl ConfigStore {
                 AppConfig::default()
             }
         };
+        // Eine beim Laden erzeugte Kennung muss auf die Platte, sonst waere
+        // der Rahmen fuer Home Assistant bei jedem Start ein neues Geraet
+        // (E-47).
+        let fresh_udn = config.upnp.udn.trim().is_empty();
         config.clamp();
+        if fresh_udn {
+            if let Err(e) = self.save(&config) {
+                log::warn!("Geraetekennung nicht speicherbar: {e}");
+            }
+        }
         config
     }
 

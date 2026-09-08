@@ -68,6 +68,14 @@ pub fn set_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig)
     {
         app.state::<crate::mqtt::MqttService>().apply_config(&app);
     }
+    let u = &updated.upnp;
+    let ub = &before.upnp;
+    if u.enabled != ub.enabled || u.port != ub.port || u.friendly_name != ub.friendly_name {
+        app.state::<crate::upnp::UpnpService>().apply_config(&app);
+    }
+    // Ein aktiver Weck- oder Schlafbefehl truege sonst die Helligkeit von
+    // vorhin weiter (E-50).
+    state.refresh_display_override();
     let display = state.display_state();
     crate::brightness::apply(display.brightness);
     crate::orientation::apply(updated.orientation);
@@ -123,13 +131,22 @@ pub fn current_slide(state: State<'_, AppState>) -> Option<Slide> {
     state.current_slide()
 }
 
+/// Weiterschalten. `manual` heisst Geste oder Knopf, sonst Taktgeber: nur eine
+/// Geste beendet ein Fremdbild aus Home Assistant (E-52), der Takt laesst es
+/// haengen und bekommt dasselbe Bild zurueck.
 #[tauri::command]
-pub fn next_slide(state: State<'_, AppState>) -> Option<Slide> {
+pub fn next_slide(app: AppHandle, state: State<'_, AppState>, manual: Option<bool>) -> Option<Slide> {
+    if manual.unwrap_or(false) {
+        crate::control::finish_external(&app);
+    }
     state.advance()
 }
 
 #[tauri::command]
-pub fn prev_slide(state: State<'_, AppState>) -> Option<Slide> {
+pub fn prev_slide(app: AppHandle, state: State<'_, AppState>, manual: Option<bool>) -> Option<Slide> {
+    if manual.unwrap_or(false) {
+        crate::control::finish_external(&app);
+    }
     state.back()
 }
 
@@ -158,6 +175,12 @@ pub fn image_info(state: State<'_, AppState>, id: String) -> Option<CacheEntry> 
 /// Bild aus der Diashow nehmen, ohne es an der Quelle zu löschen (FA-30).
 #[tauri::command]
 pub fn exclude_image(app: AppHandle, state: State<'_, AppState>, id: String) -> Res<()> {
+    // Ein Fremdbild (E-52) steht in keiner Sammlung: „aus der Diashow nehmen"
+    // heisst hier schlicht beenden.
+    if crate::state::is_external_id(&id) {
+        crate::control::end_external(&app);
+        return Ok(());
+    }
     state.exclude_image(&id)?;
 
     // Auch `None` wird gemeldet: war es das letzte Bild, muss der Rahmen es vom

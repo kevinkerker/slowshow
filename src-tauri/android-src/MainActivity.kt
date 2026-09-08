@@ -3,6 +3,7 @@ package dev.kerker.slowshow
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ActivityInfo
+import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
@@ -198,6 +199,42 @@ class MainActivity : TauriActivity() {
         // Ein Bilderrahmen darf an der Akkuanzeige nicht scheitern (NF-01).
         Log.w(TAG, "Akkuzustand nicht lesbar: $e")
         "-1;-1;0"
+    }
+
+    /**
+     * Multicast-Lock fuer SSDP (E-47).
+     *
+     * Androids WLAN-Schicht verwirft Multicast-Pakete, solange keine App einen
+     * MulticastLock haelt — die M-SEARCH-Anfragen von Home Assistant kaemen
+     * nie an, und der Rahmen bliebe unauffindbar. Der Lock kostet etwas
+     * Strom, weil das Funkmodul mehr Pakete annimmt; der Rahmen haengt am
+     * Netzteil. Nicht referenzgezaehlt: ein zweites `acquire` ist kein
+     * zweiter Lock, ein `release` gibt frei.
+     */
+    private var multicastLock: WifiManager.MulticastLock? = null
+
+    @Keep
+    fun acquireMulticastLock() {
+        try {
+            if (multicastLock == null) {
+                val wifi = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+                multicastLock = wifi.createMulticastLock("slowshow-ssdp").apply {
+                    setReferenceCounted(false)
+                }
+            }
+            multicastLock?.takeIf { !it.isHeld }?.acquire()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Multicast-Lock nicht erhalten: $e")
+        }
+    }
+
+    @Keep
+    fun releaseMulticastLock() {
+        try {
+            multicastLock?.takeIf { it.isHeld }?.release()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Multicast-Lock nicht freigegeben: $e")
+        }
     }
 
     /** Hilfsaufruf für Tests am Gerät: aktueller Zustand der Systemleisten. */

@@ -18,6 +18,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
 /// Wie viele Quellen zeitgleich abgeglichen werden (E-43).
@@ -126,6 +127,58 @@ pub struct AppState {
     /// (wie die Ausrichtung, E-26). Sie deckelt die Zielgroesse beim
     /// Aufbereiten — siehe [`AppState::effective_cache_config`].
     display_edge_px: AtomicU32,
+    /// Anzeigezustand aus einem Weck- oder Schlafbefehl des Heimnetzes (FA-55).
+    ///
+    /// Vorher schickte `control::set_screen` nur ein Ereignis, das nirgends
+    /// hinterlegt war. Die Anzeigeschleife verglich weiter gegen ihren eigenen
+    /// letzten Stand — der sich ohne Zeitplan nie aendert — und sendete deshalb
+    /// nie wieder. Ein `screen off` schwaerzte den Rahmen bis zum Neustart, ein
+    /// Neuladen der Oberflaeche zeigte dagegen die Diashow. Hier steht der
+    /// Befehl, damit jeder Leser dasselbe sieht — bis der Zeitplan das naechste
+    /// Mal umschaltet (E-46).
+    display_override: Mutex<Option<DisplayState>>,
+    /// Ein Bild von aussen (E-52) — vorgemerkt oder gerade an der Wand.
+    ///
+    /// Genau eines, nur im Speicher, nie im Cache: es gehoert nicht zur
+    /// Sammlung und darf weder in die Reihenfolge noch in den Index geraten.
+    external: Mutex<Option<External>>,
+    /// Laufende Nummer fuer die Ids der Fremdbilder.
+    external_seq: AtomicU32,
+}
+
+/// Praefix der Id eines Fremdbilds (E-52).
+///
+/// Cache-Ids sind hexadezimal, ein Buchstabe mit Unterstrich kann also nicht
+/// kollidieren — dasselbe Muster wie `t_` fuer Vorschaubilder (E-25). Die
+/// Oberflaeche kennt den Unterschied nicht: sie laedt `slowshow://img/x_1`
+/// wie jedes andere Bild, und `serve_image` weiss, wo es liegt.
+pub const EXTERNAL_PREFIX: &str = "x_";
+
+pub fn is_external_id(id: &str) -> bool {
+    id.starts_with(EXTERNAL_PREFIX)
+}
+
+/// Wie lange ein vorgemerktes Fremdbild auf sein `Play` wartet.
+///
+/// Home Assistant schickt Play unmittelbar nach `SetAVTransportURI`. Bleibt
+/// es aus (Automation abgebrochen, `autoplay: false` vergessen), darf das Bild
+/// nicht Stunden spaeter beim naechsten Play aus dem Nichts erscheinen.
+pub const EXTERNAL_STAGE_TTL: Duration = Duration::from_secs(60);
+
+/// Ein Bild von aussen (E-52): von Home Assistant per `play_media` geschickt.
+///
+/// Liegt nur im Speicher — nie im Cache, nie im Index, nie in der Reihenfolge.
+/// Es gehoert nicht zur Sammlung; es haengt kurz an der Wand und ist weg.
+#[derive(Debug, Clone)]
+pub struct External {
+    pub id: String,
+    pub title: String,
+    pub uri: String,
+    /// Fertig aufbereitetes JPEG in Displaygroesse (NF-12).
+    pub jpeg: Vec<u8>,
+    /// Haengt es gerade? Vorher ist es nur vorgemerkt.
+    pub showing: bool,
+    staged_at: Instant,
 }
 
 impl AppState {
@@ -165,6 +218,9 @@ impl AppState {
             smart_next: Mutex::new(None),
             frame_portrait: AtomicBool::new(starts_portrait),
             display_edge_px: AtomicU32::new(0),
+            display_override: Mutex::new(None),
+            external: Mutex::new(None),
+            external_seq: AtomicU32::new(0),
             sync_claimed: Mutex::new(HashSet::new()),
             sync_slots: Arc::new(Semaphore::new(MAX_PARALLEL_SOURCES)),
             resync_cancel: AtomicBool::new(false),
@@ -257,6 +313,131 @@ impl AppState {
 
     pub fn set_playing(&self, playing: bool) {
         self.playing.store(playing, Ordering::Relaxed);
+    }
+
+    // ── Fremdbild (E-52) ────────────────────────────────────────────────────
+
+    /// Merkt ein Bild von aussen vor; gezeigt wird es erst mit
+    /// [`Self::show_external`] — Home Assistant schickt dafuer `Play`.
+    ///
+    /// Dekodiert und skaliert hier im Rust-Prozess auf Displaygroesse (NF-12,
+    /// NF-13): die WebView bekommt, wie bei jedem Cache-Bild, ein fertiges
+    /// JPEG. Ein bereits haengendes Fremdbild wird dabei ersetzt.
+    pub fn stage_external(&self, bytes: &[u8], title: &str, uri: &str) -> Result<(), String> {
+        self.stage_external_at(bytes, title, uri, Instant::now())
+    }
+
+    fn stage_external_at(
+        &self,
+        bytes: &[u8],
+        title: &str,
+        uri: &str,
+        staged_at: Instant,
+    ) -> Result<(), String> {
+        let cache = self.effective_cache_config();
+        let prepared = crate::decode::prepare(
+            bytes,
+            cache.target_width,
+            cache.target_height,
+            cache.jpeg_quality,
+            1,
+            1,
+        )
+        .map_err(|e| e.to_string())?;
+        let seq = self.external_seq.fetch_add(1, Ordering::Relaxed) + 1;
+        let external = External {
+            id: format!("{EXTERNAL_PREFIX}{seq}"),
+            title: title.to_string(),
+            uri: uri.to_string(),
+            jpeg: prepared.bytes,
+            showing: false,
+            staged_at,
+        };
+        if let Ok(mut slot) = self.external.lock() {
+            *slot = Some(external);
+        }
+        Ok(())
+    }
+
+    /// Zeigt das vorgemerkte Fremdbild. `None`, wenn keines wartet oder das
+    /// wartende zu alt ist — dann wird es verworfen.
+    pub fn show_external(&self) -> Option<Slide> {
+        self.show_external_within(EXTERNAL_STAGE_TTL)
+    }
+
+    fn show_external_within(&self, max_age: Duration) -> Option<Slide> {
+        let mut slot = self.external.lock().ok()?;
+        let expired = slot
+            .as_ref()
+            .map(|e| !e.showing && e.staged_at.elapsed() > max_age)
+            .unwrap_or(false);
+        if expired {
+            *slot = None;
+            return None;
+        }
+        let external = slot.as_mut()?;
+        external.showing = true;
+        Some(Slide::Single {
+            id: external.id.clone(),
+        })
+    }
+
+    /// Raeumt das Fremdbild ab, vorgemerkt oder haengend.
+    /// `true`, wenn eines **hing** — dann muss die Anzeige nachziehen.
+    pub fn end_external(&self) -> bool {
+        self.external
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
+            .map(|e| e.showing)
+            .unwrap_or(false)
+    }
+
+    /// Das haengende Fremdbild als Slide, sonst `None`.
+    pub fn external_slide(&self) -> Option<Slide> {
+        let slot = self.external.lock().ok()?;
+        let e = slot.as_ref().filter(|e| e.showing)?;
+        Some(Slide::Single { id: e.id.clone() })
+    }
+
+    /// Id, Titel und Quelle des haengenden Fremdbilds.
+    pub fn external_info(&self) -> Option<(String, String, String)> {
+        let slot = self.external.lock().ok()?;
+        let e = slot.as_ref().filter(|e| e.showing)?;
+        Some((e.id.clone(), e.title.clone(), e.uri.clone()))
+    }
+
+    /// Die Bytes des haengenden Fremdbilds — fuer das Asset-Protokoll und das
+    /// Cover in Home Assistant.
+    pub fn read_external(&self, id: &str) -> Option<Vec<u8>> {
+        let slot = self.external.lock().ok()?;
+        slot.as_ref()
+            .filter(|e| e.showing && e.id == id)
+            .map(|e| e.jpeg.clone())
+    }
+
+    /// Baut einen aktiven Weck- oder Schlafbefehl mit der aktuellen
+    /// Konfiguration neu auf (E-50).
+    ///
+    /// Der Befehl friert die Helligkeit seines Zeitpunkts ein; aendert sich
+    /// danach die Einstellung, truege er die alte weiter — der Regler bewegte
+    /// sich, der Schirm nicht. An oder aus bleibt, wie es war.
+    pub fn refresh_display_override(&self) {
+        let on = self
+            .display_override
+            .lock()
+            .ok()
+            .and_then(|o| (*o).map(|d| d.slideshow_active));
+        if let Some(on) = on {
+            self.set_display_override(on);
+        }
+    }
+
+    /// Hebt einen Weck- oder Schlafbefehl auf; danach gilt wieder der Zeitplan.
+    pub fn clear_display_override(&self) {
+        if let Ok(mut o) = self.display_override.lock() {
+            *o = None;
+        }
     }
 
     /// Meldet Quellen zum Abgleich an und gibt zurueck, welche davon neu sind
@@ -355,6 +536,11 @@ impl AppState {
     }
 
     pub fn current_slide(&self) -> Option<Slide> {
+        // Ein Fremdbild (E-52) haengt vor allem anderen.
+        if let Some(slide) = self.external_slide() {
+            return Some(slide);
+        }
+
         let config = self.config_snapshot();
 
         if config.order == PlayOrder::Smart {
@@ -547,10 +733,19 @@ impl AppState {
 
     /// Schaltet weiter und merkt die Anzeige für den Ringpuffer (FA-27).
     pub fn advance(&self) -> Option<Slide> {
+        // Solange ein Fremdbild haengt (E-52), laeuft der Takt leer: der
+        // Zeitgeber ruft weiter, bekommt aber dasselbe Bild zurueck. Beendet
+        // wird es nur von Hand — der Aufrufer raeumt es vorher ab.
+        if let Some(slide) = self.external_slide() {
+            return Some(slide);
+        }
         self.step(true)
     }
 
     pub fn back(&self) -> Option<Slide> {
+        if let Some(slide) = self.external_slide() {
+            return Some(slide);
+        }
         self.step(false)
     }
 
@@ -698,8 +893,74 @@ impl AppState {
     // ── Zeitsteuerung ───────────────────────────────────────────────────────
 
     /// Aktueller Anzeigezustand laut Zeitplan (FA-52–54).
+    /// Was Anzeige und Helligkeit gerade tun sollen: der Zeitplan — oder ein
+    /// Befehl aus dem Heimnetz, solange der gilt (FA-55, E-46).
+    ///
+    /// Eine Quelle fuer alle Leser: Anzeigeschleife, `get_display_state` beim
+    /// Laden der Oberflaeche, REST- und MQTT-Status. Vorher kannte nur das
+    /// Ereignis den Befehl, und ein Neuladen widersprach dem Rahmen.
     pub fn display_state(&self) -> DisplayState {
+        self.display_override
+            .lock()
+            .ok()
+            .and_then(|o| *o)
+            .unwrap_or_else(|| self.scheduled_display_state())
+    }
+
+    /// Zustand allein laut Zeitplan und Helligkeitseinstellung (FA-52, FA-53).
+    fn scheduled_display_state(&self) -> DisplayState {
         schedule::evaluate(&self.config_snapshot(), schedule::now_local_minutes())
+    }
+
+    /// Weck- oder Schlafbefehl aus dem Heimnetz (FA-55).
+    ///
+    /// Setzt den Zeitplan nicht ausser Kraft, sondern ueberlagert ihn: bis zu
+    /// dessen naechstem Umschalten gilt der Befehl, danach wieder der Plan
+    /// (siehe [`Self::tick_display`]). Ohne Zeitplan schaltet nichts um — dann
+    /// gilt der Befehl bis zum Gegenbefehl, und genau das sagt auch der Status.
+    pub fn set_display_override(&self, on: bool) -> DisplayState {
+        let config = self.config_snapshot();
+        let display = if on {
+            DisplayState {
+                slideshow_active: true,
+                show_night_clock: false,
+                brightness: schedule::wake_brightness(&config.brightness),
+            }
+        } else {
+            DisplayState {
+                slideshow_active: false,
+                show_night_clock: config.schedule.night_clock,
+                // Auch der Schlafbefehl greift nicht in eine Helligkeit ein,
+                // die der Nutzer dem Geraet uebertragen hat (E-22). Der Schirm
+                // wird trotzdem schwarz — das erledigt die Oberflaeche.
+                brightness: schedule::app_brightness(
+                    &config.brightness,
+                    schedule::NIGHT_BRIGHTNESS,
+                ),
+            }
+        };
+        if let Ok(mut o) = self.display_override.lock() {
+            *o = Some(display);
+        }
+        display
+    }
+
+    /// Ein Takt der Anzeigeschleife (FA-52–55).
+    ///
+    /// `last_schedule` ist der Zeitplan-Zustand des vorigen Takts. Schaltet der
+    /// Zeitplan um — Morgen, Abend, Absenkung, geaenderte Einstellung —,
+    /// verfaellt ein Befehl aus dem Heimnetz: „setzt den Zeitplan nicht ausser
+    /// Kraft". Beim allerersten Takt gibt es keinen Vergleich; ein Befehl aus
+    /// den ersten Sekunden nach dem Start bleibt deshalb stehen.
+    pub fn tick_display(&self, last_schedule: &mut Option<DisplayState>) -> DisplayState {
+        let scheduled = self.scheduled_display_state();
+        if last_schedule.is_some() && *last_schedule != Some(scheduled) {
+            if let Ok(mut o) = self.display_override.lock() {
+                *o = None;
+            }
+        }
+        *last_schedule = Some(scheduled);
+        self.display_state()
     }
 
     /// Schreibt ausstehende Änderungen. Beim Pausieren und Beenden aufrufen.
@@ -1278,6 +1539,251 @@ mod tests {
         assert!(!state.is_playing());
         state.set_playing(true);
         assert!(state.is_playing());
+    }
+
+    /// Zeitfenster um die aktuelle Minute, das `now` einschliesst oder
+    /// ausschliesst — der Zeitplan rechnet mit der echten Uhr.
+    fn fenster(enthaelt_jetzt: bool) -> (String, String) {
+        let jetzt = schedule::now_local_minutes() as i64;
+        let hm = |m: i64| format!("{:02}:{:02}", m.rem_euclid(1440) / 60, m.rem_euclid(1440) % 60);
+        if enthaelt_jetzt {
+            (hm(jetzt - 2), hm(jetzt + 3))
+        } else {
+            (hm(jetzt + 3), hm(jetzt + 5))
+        }
+    }
+
+    fn zeitplan(state: &AppState, enthaelt_jetzt: bool) {
+        let (von, bis) = fenster(enthaelt_jetzt);
+        state
+            .update_config(|c| {
+                c.schedule.enabled = true;
+                c.schedule.active_from = von.clone();
+                c.schedule.active_to = bis.clone();
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn heimnetz_befehl_ueberlagert_den_zeitplan_fa_55() {
+        // Regression: der Schlafbefehl war nur ein Ereignis. Die Schleife sah
+        // ihn nicht, `get_display_state` auch nicht — der Rahmen blieb schwarz,
+        // die neu geladene Oberflaeche zeigte trotzdem die Diashow.
+        let dir = TempDir::new("override");
+        let state = AppState::new(&dir.0).unwrap();
+        assert!(state.display_state().slideshow_active, "ohne Zeitplan aktiv");
+
+        let schlaf = state.set_display_override(false);
+        assert!(!schlaf.slideshow_active);
+        assert!(
+            !state.display_state().slideshow_active,
+            "der Befehl gilt fuer jeden Leser, nicht nur fuer das Ereignis"
+        );
+
+        // Ohne Zeitplan schaltet nichts um: der Befehl bleibt ueber Takte.
+        let mut last = None;
+        for _ in 0..5 {
+            assert!(!state.tick_display(&mut last).slideshow_active);
+        }
+
+        assert!(state.set_display_override(true).slideshow_active);
+        assert!(state.tick_display(&mut last).slideshow_active);
+    }
+
+    #[test]
+    fn heimnetz_befehl_verfaellt_beim_umschalten_des_zeitplans_fa_55() {
+        // "Setzt den Zeitplan nicht ausser Kraft": ein Weckbefehl in der Nacht
+        // gilt, bis der Plan das naechste Mal umschaltet — nicht fuer immer.
+        let dir = TempDir::new("override-edge");
+        let state = AppState::new(&dir.0).unwrap();
+        let mut last = None;
+
+        // Nacht laut Plan, Takt merkt sich den Stand.
+        zeitplan(&state, false);
+        assert!(!state.tick_display(&mut last).slideshow_active);
+
+        // Weckbefehl: an, und er haelt ueber Takte ohne Umschalten.
+        state.set_display_override(true);
+        assert!(state.tick_display(&mut last).slideshow_active);
+        assert!(state.tick_display(&mut last).slideshow_active);
+
+        // Der Plan schaltet auf Tag um — der Befehl ist damit verbraucht.
+        zeitplan(&state, true);
+        assert!(state.tick_display(&mut last).slideshow_active);
+
+        // Schaltet der Plan spaeter auf Nacht, gilt der Plan, nicht der alte
+        // Befehl. Ohne das Verfallen bliebe hier der Weckbefehl stehen.
+        zeitplan(&state, false);
+        assert!(
+            !state.tick_display(&mut last).slideshow_active,
+            "der Zeitplan hat das letzte Wort"
+        );
+    }
+
+    #[test]
+    fn schlafbefehl_traegt_nachtuhr_und_helligkeit_aus_der_einstellung_fa_55() {
+        let dir = TempDir::new("override-shape");
+        let state = AppState::new(&dir.0).unwrap();
+
+        let schlaf = state.set_display_override(false);
+        assert!(schlaf.show_night_clock, "Voreinstellung: Nachtuhr an");
+        assert_eq!(schlaf.brightness, schedule::NIGHT_BRIGHTNESS);
+
+        let wach = state.set_display_override(true);
+        assert!(wach.slideshow_active);
+        assert!(!wach.show_night_clock);
+        assert_eq!(wach.brightness, 100, "Wecken heisst: jetzt will jemand sehen");
+
+        // Regelt das Geraet die Helligkeit (E-22), fasst auch der Befehl sie
+        // nicht an.
+        state
+            .update_config(|c| c.brightness.device_controlled = true)
+            .unwrap();
+        assert_eq!(
+            state.set_display_override(false).brightness,
+            schedule::DEVICE_CONTROLLED
+        );
+    }
+
+    #[test]
+    fn konfigurationsaenderung_erneuert_einen_aktiven_befehl_e_50() {
+        let dir = TempDir::new("override-refresh");
+        let state = AppState::new(&dir.0).unwrap();
+
+        // Der Weckbefehl friert die Helligkeit seines Zeitpunkts ein.
+        assert_eq!(state.set_display_override(true).brightness, 100);
+        state.update_config(|c| c.brightness.level = 40).unwrap();
+        assert_eq!(
+            state.display_state().brightness,
+            100,
+            "eingefroren — genau der Fehler, den E-50 behebt"
+        );
+
+        state.refresh_display_override();
+        let display = state.display_state();
+        assert_eq!(display.brightness, 40);
+        assert!(display.slideshow_active, "an bleibt an");
+
+        // Auch der Schlafbefehl folgt der Einstellung (E-22).
+        state.set_display_override(false);
+        state
+            .update_config(|c| c.brightness.device_controlled = true)
+            .unwrap();
+        state.refresh_display_override();
+        let display = state.display_state();
+        assert!(!display.slideshow_active, "aus bleibt aus");
+        assert_eq!(display.brightness, schedule::DEVICE_CONTROLLED);
+
+        // Aufheben: danach gilt der Zeitplan — ohne Zeitplan also aktiv.
+        state.clear_display_override();
+        assert!(state.display_state().slideshow_active);
+    }
+
+    #[test]
+    fn ohne_befehl_erfindet_das_auffrischen_keinen_e_50() {
+        let dir = TempDir::new("override-none");
+        let state = AppState::new(&dir.0).unwrap();
+        zeitplan(&state, false);
+        assert!(!state.display_state().slideshow_active);
+        state.refresh_display_override();
+        // Der Plan sagt Nacht, es bleibt Nacht.
+        assert!(!state.display_state().slideshow_active);
+    }
+
+    fn test_jpeg(w: u32, h: u32) -> Vec<u8> {
+        let img = image::RgbImage::from_pixel(w, h, image::Rgb([200, 100, 50]));
+        let mut buf = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut buf, image::ImageFormat::Jpeg)
+            .unwrap();
+        buf.into_inner()
+    }
+
+    #[test]
+    fn fremdbild_haengt_vor_der_diashow_und_der_takt_laeuft_leer_e_52() {
+        let dir = TempDir::new("external");
+        let state = AppState::new(&dir.0).unwrap();
+        assert!(state.current_slide().is_none(), "leerer Cache");
+
+        state
+            .stage_external(&test_jpeg(8, 6), "Haustuer", "http://ha/klingel.jpg")
+            .unwrap();
+        // Vorgemerkt heisst noch nicht gezeigt: Home Assistant schickt erst Play.
+        assert!(state.current_slide().is_none());
+        assert!(state.read_external("x_1").is_none());
+
+        let slide = state.show_external().expect("vorgemerkt");
+        assert_eq!(slide, Slide::Single { id: "x_1".into() });
+        assert_eq!(state.current_slide(), Some(slide.clone()));
+        // Der Taktgeber ruft weiter `advance`: dasselbe Bild kommt zurueck.
+        assert_eq!(state.advance(), Some(slide.clone()));
+        assert_eq!(state.back(), Some(slide.clone()));
+        let bytes = state.read_external("x_1").expect("Bytes");
+        assert_eq!(&bytes[..2], &[0xFF, 0xD8], "fertiges JPEG");
+        assert_eq!(
+            state.external_info(),
+            Some(("x_1".into(), "Haustuer".into(), "http://ha/klingel.jpg".into()))
+        );
+
+        assert!(state.end_external(), "es hing");
+        assert!(state.current_slide().is_none());
+        assert!(state.read_external("x_1").is_none());
+        assert!(!state.end_external(), "nichts mehr da");
+    }
+
+    #[test]
+    fn fremdbild_wird_auf_displaygroesse_gebracht_e_52() {
+        // R-03: ein Kamerabild in voller Aufloesung gehoert nicht in die
+        // WebView. Der Deckel ist die laengste Displaykante (NF-12).
+        let dir = TempDir::new("external-size");
+        let state = AppState::new(&dir.0).unwrap();
+        state.set_display_size(64, 40);
+        state
+            .stage_external(&test_jpeg(400, 300), "gross", "http://ha/g.jpg")
+            .unwrap();
+        state.show_external().unwrap();
+        let bytes = state.read_external("x_1").unwrap();
+        let decoded = image::load_from_memory(&bytes).unwrap();
+        assert!(
+            decoded.width() <= 64 && decoded.height() <= 64,
+            "{}x{}",
+            decoded.width(),
+            decoded.height()
+        );
+    }
+
+    #[test]
+    fn vorgemerktes_fremdbild_verfaellt_ohne_play_e_52() {
+        let dir = TempDir::new("external-ttl");
+        let state = AppState::new(&dir.0).unwrap();
+        let alt = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(120))
+            .expect("Uhr laeuft laenger als zwei Minuten");
+        state
+            .stage_external_at(&test_jpeg(8, 6), "alt", "http://ha/alt.jpg", alt)
+            .unwrap();
+        assert!(state.show_external().is_none(), "zu alt");
+        assert!(state.current_slide().is_none());
+
+        // Frisch vorgemerkt geht.
+        state
+            .stage_external(&test_jpeg(8, 6), "neu", "http://ha/neu.jpg")
+            .unwrap();
+        assert!(state.show_external().is_some());
+        // Ein haengendes Bild verfaellt nicht — es haengt, bis jemand es beendet.
+        assert!(state
+            .show_external_within(std::time::Duration::ZERO)
+            .is_some());
+    }
+
+    #[test]
+    fn fremdbild_braucht_ein_lesbares_bild_e_52() {
+        let dir = TempDir::new("external-bad");
+        let state = AppState::new(&dir.0).unwrap();
+        assert!(state
+            .stage_external(b"kein bild", "x", "http://ha/x")
+            .is_err());
+        assert!(state.show_external().is_none());
     }
 
     #[test]

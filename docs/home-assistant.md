@@ -17,6 +17,100 @@ aktiv sein und lösen dieselben Aktionen aus.
 
 ---
 
+## Ohne Eingabe: der Rahmen als Medienrenderer
+
+Der Rahmen meldet sich im Heimnetz als DLNA-Medienrenderer. Home Assistant
+findet ihn von selbst — unter **Einstellungen → Geräte & Dienste** erscheint
+„Neues Gerät gefunden: Slowshow", ein Klick auf *Hinzufügen*, fertig. Am Rahmen
+ist nichts einzutragen; in den Einstellungen unter **System → Automatisch in
+Home Assistant** lässt es sich abschalten oder umbenennen.
+
+Was daraus wird, ist ein `media_player`:
+
+| In Home Assistant | Am Rahmen |
+|---|---|
+| Play | Schirm an, Diashow läuft (weckt einen dunklen Rahmen) |
+| Stop | Nachtmodus (Schirm dunkel); zeigt ein Bild aus HA, beendet Stop nur das |
+| Stumm | Nachtmodus an / aus |
+| Weiter / Zurück | Nächstes / vorheriges Bild; beendet ein Bild aus HA |
+| Lautstärke 0–100 | Helligkeit 1–100 % |
+| Titel und Cover | Dateiname und das laufende Foto |
+| `play_media` mit Bild-URL | Bild bis zum nächsten Weiter oder Stop; weckt den Schirm |
+| `play_media` mit Kamerastrom | das erste Bild aus dem Strom als Standbild, sonst wie oben |
+
+Es gibt bewusst **keine Pause**: Home Assistant zeigt bei laufender Wiedergabe
+nur einen Knopf und nimmt Pause, sobald ein Gerät Pause kann. Ohne Pause ist
+Stop der Hauptknopf, und der Nachtmodus ist mit einem Klick erreichbar. Wer die
+Diashow anhalten will, ohne den Schirm zu dunkeln, nimmt MQTT oder REST. Tippt
+jemand am Rahmen auf Pause, meldet der Rahmen „pausiert", und Play setzt fort.
+
+Die Beschriftung stammt von Home Assistant: dort heißt es Lautstärke und
+Stumm. Für Automationen ist das egal; auf der Tafel kannst du die Karte selbst
+benennen. Sensoren wie Akku oder Bilderzahl gibt es auf diesem Weg nicht — die
+liefern MQTT oder REST weiter unten.
+
+**Helligkeit.** Der Regler stellt die Fensterhelligkeit des Tablets, solange
+Slowshow im Vordergrund ist. Steht in Slowshow „Helligkeit vom Gerät regeln
+lassen" an, schaltet der erste Helligkeitsbefehl aus Home Assistant das ab —
+ein Regler, der nichts tut, wäre schlimmer. Zurück zur Automatik über den
+Schalter in der App oder MQTT. 100 % sind 100 % des normalen Bereichs; die
+Reserve für Sonnenlicht, die manche Tablets nur mit Adaptivhelligkeit
+freigeben, erreicht keine App.
+
+**Ein Bild aus Home Assistant zeigen** — Türklingel, Kamera, Wetterkarte:
+
+```yaml
+automation:
+  - alias: "Türklingel auf dem Rahmen"
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.klingel
+        to: "on"
+    actions:
+      - action: camera.snapshot
+        target:
+          entity_id: camera.haustuer
+        data:
+          filename: /config/www/klingel.jpg
+      - action: media_player.play_media
+        target:
+          entity_id: media_player.slowshow
+        data:
+          media_content_type: image/jpeg
+          media_content_id: http://homeassistant.local:8123/local/klingel.jpg
+          extra:
+            title: Haustür
+```
+
+Das Bild hängt, bis jemand am Rahmen wischt, Weiter oder Stop aus Home
+Assistant kommt. Läuft die Diashow, erscheint es sofort mit dem Empfang. Ein
+dunkler oder pausierter Rahmen wartet auf das Play, das Home Assistant in
+diesem Fall schickt, wird dafür geweckt und folgt danach wieder seinem
+Zeitplan. Kennt Home Assistant den Rahmen als dunkel, schickt es vor dem Bild
+ein Stop; der Schirm wird dann für einen Sekundenbruchteil dunkel, bevor das
+Bild erscheint.
+Die Adresse muss vom Tablet aus erreichbar sein; erlaubt sind `http` und
+`https`, bis 25 MB, alle Formate, die der Rahmen auch aus Quellen liest.
+
+**Kamera direkt.** Der Umweg über `camera.snapshot` ist nicht nötig: Wählst du
+im Kamera-Dialog von Home Assistant „Auf Media-Player abspielen" oder schickst
+per `play_media` die Adresse eines Kamerastroms (`/api/camera_proxy_stream/…`),
+nimmt der Rahmen das **erste Bild** aus dem Strom und zeigt es als Standbild.
+Ein Video wird daraus nicht — ein Bilderrahmen zeigt Bilder. Wer die Kamera
+laufend sehen will, schickt in einer Automation alle paar Sekunden erneut
+`play_media`; jeder Aufruf ersetzt das Bild. Ohne diesen Weg blieb der Rahmen
+früher nach so einem Versuch im Nachtmodus stehen: Das Stop, das vor jedem
+`play_media` kommt, dunkelt den Schirm, und der abgewiesene Strom brachte kein
+Bild mehr, das ihn geweckt hätte.
+
+Voraussetzung: Tablet und Home Assistant im selben Netz, und das Netz lässt
+Multicast durch (Gast-WLANs oft nicht).
+
+**Nach einem Neustart des Rahmens** meldet er sich mit neuer `BOOTID` an. Home
+Assistant erkennt daran, dass seine Ereignis-Abonnements weg sind, verbindet
+sich neu und zeigt wieder live, was der Rahmen tut. Zeigt die Karte trotzdem
+nichts Aktuelles, hilft „Integration neu laden" bei DLNA Digital Media Renderer.
+
 ## MQTT — der kurze Weg
 
 In Slowshow: **Einstellungen → System → MQTT** einschalten und eintragen:

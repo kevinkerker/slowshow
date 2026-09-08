@@ -11,6 +11,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useConfigStore } from '@/stores/config'
 import { keepAwake, releaseAwake } from '@/lib/wake'
 import { dimOpacity as computeDim } from '@/lib/dim'
+import { retryUntilResolved } from '@/lib/retry'
 import { applyOrientation, reportDisplaySize, setFrameOrientation } from '@/lib/api'
 
 const store = useConfigStore()
@@ -43,7 +44,21 @@ function reportOrientation() {
 }
 
 onMounted(async () => {
-  await store.load()
+  // Laden, bis es gelingt (E-54, NF-02). Am Gerät kam `get_config` beim
+  // Start mit „state not managed" zurück, weil Rust den Bildindex noch las —
+  // und ohne Wiederholung blieb der Rahmen dunkel, bis jemand ihn neu
+  // startete. Ein gescheiterter Versuch räumt seine Hörer weg, sonst käme
+  // nach dem nächsten jedes Ereignis doppelt an.
+  await retryUntilResolved(
+    async () => {
+      store.dispose()
+      await store.load()
+    },
+    {
+      onError: (e, attempt) =>
+        console.error(`Konfiguration nicht geladen (Versuch ${attempt}), es folgt ein weiterer`, e),
+    },
+  )
   loaded.value = true
   // Erst die eingestellte Ausrichtung durchsetzen, dann melden, was dabei
   // herauskam — in der anderen Reihenfolge meldeten wir die alte Lage.

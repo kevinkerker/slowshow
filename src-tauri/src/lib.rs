@@ -37,9 +37,11 @@ pub mod secrets;
 pub mod sources;
 pub mod state;
 pub mod sync;
+pub mod upnp;
 
 use mqtt::MqttService;
 use remote::RemoteServer;
+use upnp::UpnpService;
 use state::{events, AppState};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -230,12 +232,32 @@ pub fn run() {
             // ist die Brücke sicher da.
             app.manage(RemoteServer::default());
             app.manage(MqttService::default());
+            app.manage(UpnpService::default());
             app.manage(BackgroundTasks::default());
+
+            // Erst der Zustand, dann das Fenster (E-54, NF-01).
+            //
+            // Tauri legt die Fenster aus `tauri.conf.json` *vor* diesem Hook
+            // an. Die WebView laedt ihr Buendel aus dem APK in Millisekunden
+            // und ruft `get_config`, waehrend `AppState::new` bei einigen
+            // tausend Bildern noch den Index liest. Die Antwort war dann
+            // "state not managed for field `state`", und der Rahmen blieb
+            // dunkel — am Geraet reproduzierbar, je groesser der Index, desto
+            // sicherer. Deshalb steht dort `create: false`, und das Fenster
+            // entsteht hier, wenn jeder Befehl beantwortbar ist. Der Test
+            // `fenster_entstehen_erst_nach_dem_zustand_e_54` haelt die
+            // Konfiguration darauf fest; die Reihenfolge selbst braucht eine
+            // laufende App und ist am Geraet nachgewiesen.
+            for window in app.config().app.windows.iter().filter(|w| !w.create) {
+                tauri::WebviewWindowBuilder::from_config(app.handle(), window)?.build()?;
+            }
 
             // FA-55: Heimnetz-Steuerung starten, falls konfiguriert.
             let handle = app.handle().clone();
             handle.state::<RemoteServer>().apply_config(&handle);
             handle.state::<MqttService>().apply_config(&handle);
+            // E-47: der Rahmen als Medienrenderer, ohne Eingabe auffindbar.
+            handle.state::<UpnpService>().apply_config(&handle);
             watch_state_for_mqtt(&handle);
 
             spawn_background_tasks(app.handle().clone());
@@ -317,6 +339,23 @@ fn serve_image(
     }
 
     let state = app.state::<AppState>();
+
+    // Ein Fremdbild (E-52) liegt nicht im Cache, sondern im Speicher — und
+    // nur, solange es haengt. Kein Zwischenspeichern: die naechste Tuerklingel
+    // bekommt zwar eine neue Id, aber sicher ist sicher.
+    if !want_thumb && crate::state::is_external_id(id) {
+        return match state.read_external(id) {
+            Some(bytes) => tauri::http::Response::builder()
+                .status(200)
+                .header("Content-Type", "image/jpeg")
+                .header("Content-Length", bytes.len().to_string())
+                .header("Cache-Control", "no-store")
+                .body(bytes)
+                .unwrap_or_else(|_| not_found()),
+            None => not_found(),
+        };
+    }
+
     let Ok(mut cache) = state.cache.lock() else {
         return not_found();
     };
@@ -363,6 +402,8 @@ fn watch_state_for_mqtt(app: &tauri::AppHandle) {
         let handle = app.clone();
         app.listen(event, move |_| {
             handle.state::<MqttService>().notify_changed();
+            // Dieselben Ereignisse gehen an die UPnP-Abonnenten (E-47).
+            handle.state::<UpnpService>().notify_changed();
         });
     }
 }
@@ -398,15 +439,22 @@ fn spawn_background_tasks(app: tauri::AppHandle) {
     let display_app = app.clone();
     handles.push(tauri::async_runtime::spawn(async move {
         let mut ticker = tokio::time::interval(DISPLAY_TICK);
-        let mut last: Option<schedule::DisplayState> = None;
+        let mut last_schedule: Option<schedule::DisplayState> = None;
+        let mut last_emitted: Option<schedule::DisplayState> = None;
         while still_running() {
             ticker.tick().await;
-            let current = display_app.state::<AppState>().display_state();
-            if last != Some(current) {
+            // Der Takt laesst einen Heimnetz-Befehl verfallen, sobald der
+            // Zeitplan umschaltet (FA-55, E-46), und liefert, was jetzt gilt.
+            // Vorher verglich die Schleife nur gegen ihren eigenen Stand — der
+            // Befehl war ihr unbekannt, und sie sendete nie wieder.
+            let current = display_app
+                .state::<AppState>()
+                .tick_display(&mut last_schedule);
+            if last_emitted != Some(current) {
                 // Frontend und Displaybeleuchtung gemeinsam nachziehen (FA-53).
                 brightness::apply(current.brightness);
                 let _ = display_app.emit(events::DISPLAY, current);
-                last = Some(current);
+                last_emitted = Some(current);
             }
         }
     }));
@@ -458,6 +506,31 @@ mod tests {
             zeile,
             "2026-09-02 20:39:51+0200 [WARN] slowshow_lib::sync: 'USA': 6402 Bilder"
         );
+    }
+
+    /// Kein Fenster darf vor dem Zustand entstehen (E-54).
+    ///
+    /// Steht in `tauri.conf.json` bei einem Fenster kein `create: false`,
+    /// legt Tauri es vor dem `setup`-Hook an, und der erste `get_config` aus
+    /// der WebView trifft auf einen noch nicht angemeldeten `AppState`. Der
+    /// Fehler zeigte sich am Geraet als dauerhaft schwarzer Schirm — und
+    /// waere bei einem Aufraeumen der Konfiguration leicht wieder drin.
+    #[test]
+    fn fenster_entstehen_erst_nach_dem_zustand_e_54() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json lesbar");
+        let windows = conf["app"]["windows"]
+            .as_array()
+            .expect("tauri.conf.json: app.windows ist eine Liste");
+        assert!(!windows.is_empty(), "ohne Fenster gaebe es keine Anzeige");
+        for window in windows {
+            assert_eq!(
+                window["create"],
+                serde_json::Value::Bool(false),
+                "Fenster {} wuerde vor `manage` entstehen",
+                window["label"]
+            );
+        }
     }
 
     #[test]

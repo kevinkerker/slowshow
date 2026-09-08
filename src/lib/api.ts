@@ -145,9 +145,14 @@ export const getDisplayState = (): Promise<DisplayState> => invoke('get_display_
 
 export const currentSlide = (): Promise<Slide | null> => invoke('current_slide')
 
-export const nextSlide = (): Promise<Slide | null> => invoke('next_slide')
+/**
+ * Naechstes Bild. `manual` unterscheidet Wisch- und Tippgeste vom Taktgeber:
+ * nur eine Geste beendet ein Fremdbild aus Home Assistant (E-52), der Takt
+ * laesst es haengen.
+ */
+export const nextSlide = (manual = false): Promise<Slide | null> => invoke('next_slide', { manual })
 
-export const prevSlide = (): Promise<Slide | null> => invoke('prev_slide')
+export const prevSlide = (manual = false): Promise<Slide | null> => invoke('prev_slide', { manual })
 
 export const setPlaying = (playing: boolean): Promise<void> =>
   invoke('set_playing', { playing })

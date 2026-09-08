@@ -118,6 +118,15 @@ export interface RemoteConfig {
   token: string
 }
 
+/** Der Rahmen als DLNA-Medienrenderer — von Home Assistant ohne Eingabe gefunden (E-47). */
+export interface UpnpConfig {
+  enabled: boolean
+  port: number
+  /** Eindeutige Kennung, vom Backend erzeugt und behalten. */
+  udn: string
+  friendlyName: string
+}
+
 /** MQTT-Anbindung an Home Assistant (FA-55). */
 export interface MqttConfig {
   enabled: boolean
@@ -206,6 +215,7 @@ export interface AppConfig {
   cache: CacheConfig
   remote: RemoteConfig
   mqtt: MqttConfig
+  upnp: UpnpConfig
   /** Zwei Hochformatbilder nebeneinander (FA-08). */
   pairMode: boolean
   /** Langsames Zoomen/Schwenken (FA-10). */

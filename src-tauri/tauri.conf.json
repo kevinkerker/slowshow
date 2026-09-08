@@ -12,7 +12,9 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Slowshow",
+        "create": false,
         "width": 1280,
         "height": 800,
         "minWidth": 800,

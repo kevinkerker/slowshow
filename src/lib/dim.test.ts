@@ -11,9 +11,13 @@ describe('dimOpacity', () => {
     expect(dimOpacity(state())).toBe(0)
   })
 
-  it('setzt die Deckkraft als Gegenstueck zur Helligkeit (FA-53)', () => {
-    expect(dimOpacity(state({ brightness: 40 }))).toBeCloseTo(0.6)
-    expect(dimOpacity(state({ brightness: 25 }))).toBeCloseTo(0.75)
+  it('dimmt tags nie, die Helligkeit ist Sache des Backlights (E-51)', () => {
+    // Vorher dimmten Overlay und Backlight zugleich: 50 am Regler liessen ein
+    // Viertel des Lichts durch. Wer aus Home Assistant die Helligkeit stellt,
+    // stellt die Beleuchtung — nicht ein Bild, das ein Overlay abdunkelt.
+    expect(dimOpacity(state({ brightness: 40 }))).toBe(0)
+    expect(dimOpacity(state({ brightness: 25 }))).toBe(0)
+    expect(dimOpacity(state({ brightness: 1 }))).toBe(0)
   })
 
   it('dunkelt vor dem ersten Laden nicht ab', () => {
@@ -32,9 +36,9 @@ describe('dimOpacity', () => {
   })
 
   it('schwaerzt nachts auch bei geraetegesteuerter Helligkeit (E-22)', () => {
-    // Der eigentliche Grund fuer die feste Reihenfolge: die App senkt die
-    // Beleuchtung nicht mehr, also muss das Overlay den Schirm schwaerzen.
-    // Sonst stuende die ganze Nacht das letzte Foto auf dem Rahmen.
+    // Die App senkt die Beleuchtung dann nicht mehr, also muss das Overlay
+    // den Schirm schwaerzen. Sonst stuende die ganze Nacht das letzte Foto
+    // auf dem Rahmen.
     expect(dimOpacity(state({ slideshowActive: false, brightness: 0 }))).toBe(1)
   })
 

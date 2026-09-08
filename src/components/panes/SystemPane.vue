@@ -427,6 +427,31 @@ async function importConfig() {
 
     <!-- MQTT (FA-55). Gegenstück zur REST-Steuerung: der Rahmen verbindet
          sich zum Broker, statt dass Home Assistant ihn suchen muss. -->
+    <!-- E-47: der Rahmen meldet sich im Netz als Medienrenderer. Home
+         Assistant findet ihn damit von selbst — der Weg ohne Broker, Adresse
+         oder Passwort. Reine Anzeige der Konfiguration, keine Logik. -->
+    <section>
+      <h3 class="ss-label">{{ t('system.upnp') }}</h3>
+
+      <SettingRow :label="t('system.upnp')" :hint="t('system.upnpHint')">
+        <ToggleSwitch
+          :model-value="cfg.upnp.enabled"
+          :label="t('system.upnp')"
+          @update:model-value="(v) => store.patch((d) => (d.upnp.enabled = v))"
+        />
+      </SettingRow>
+
+      <SettingRow v-if="cfg.upnp.enabled" :label="t('system.upnpName')" :hint="t('system.upnpNameHint')" stacked>
+        <input
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          :value="cfg.upnp.friendlyName"
+          @change="store.patch((d) => (d.upnp.friendlyName = ($event.target as HTMLInputElement).value))"
+        />
+      </SettingRow>
+    </section>
+
     <section>
       <h3 class="ss-label">{{ t('system.mqtt') }}</h3>
 

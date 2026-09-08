@@ -17,6 +17,7 @@ import { useSlideshowStore } from '@/stores/slideshow'
 import { createGestureRecognizer } from '@/composables/useGestures'
 import { usePixelShift } from '@/composables/usePixelShift'
 import * as api from '@/lib/api'
+import { retryUntilResolved } from '@/lib/retry'
 import { EVENTS } from '@/lib/types'
 import { listen } from '@tauri-apps/api/event'
 
@@ -143,9 +144,22 @@ async function excludeCurrent() {
 let unlistenSync: (() => void) | null = null
 
 onMounted(async () => {
-  await show.start(
-    () => cfg.value?.intervalSeconds ?? 30,
-    () => active.value,
+  // Wie das Laden der Konfiguration in App.vue (E-54): scheitert der Start
+  // der Diashow, stünde der Rahmen ohne Taktgeber still und sähe aus wie
+  // einer, der hängt. Also wiederholen; `dispose` räumt die Hörer eines
+  // abgebrochenen Versuchs weg.
+  await retryUntilResolved(
+    async () => {
+      show.dispose()
+      await show.start(
+        () => cfg.value?.intervalSeconds ?? 30,
+        () => active.value,
+      )
+    },
+    {
+      onError: (e, attempt) =>
+        console.error(`Diashow nicht gestartet (Versuch ${attempt}), es folgt ein weiterer`, e),
+    },
   )
   void countWaiting()
   // Nach jedem Sync neu zaehlen: dann und nur dann kann sich die Zahl

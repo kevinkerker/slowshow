@@ -156,7 +156,7 @@ async fn slideshow(
     Json(body): Json<OnOff>,
 ) -> Result<Json<Value>, StatusCode> {
     guard(&ctx, &headers)?;
-    control::set_slideshow(&ctx.app, body.on);
+    control::set_slideshow(&ctx.app, body.on, control::Origin::Rest);
     Ok(Json(json!({ "playing": body.on })))
 }
 
@@ -166,7 +166,7 @@ async fn screen(
     Json(body): Json<OnOff>,
 ) -> Result<Json<Value>, StatusCode> {
     guard(&ctx, &headers)?;
-    control::set_screen(&ctx.app, body.on);
+    control::set_screen(&ctx.app, body.on, control::Origin::Rest);
     Ok(Json(json!({ "screen": body.on })))
 }
 
@@ -175,7 +175,7 @@ async fn next(
     headers: HeaderMap,
 ) -> Result<Json<Value>, StatusCode> {
     guard(&ctx, &headers)?;
-    control::next_slide(&ctx.app);
+    control::next_slide(&ctx.app, control::Origin::Rest);
     Ok(Json(
         json!({ "slide": ctx.app.state::<AppState>().current_slide() }),
     ))
@@ -186,7 +186,7 @@ async fn prev(
     headers: HeaderMap,
 ) -> Result<Json<Value>, StatusCode> {
     guard(&ctx, &headers)?;
-    control::prev_slide(&ctx.app);
+    control::prev_slide(&ctx.app, control::Origin::Rest);
     Ok(Json(
         json!({ "slide": ctx.app.state::<AppState>().current_slide() }),
     ))
@@ -217,7 +217,7 @@ async fn patch_config(
     Json(patch): Json<control::ConfigPatch>,
 ) -> Result<Json<Value>, StatusCode> {
     guard(&ctx, &headers)?;
-    control::patch_config(&ctx.app, patch)
+    control::patch_config(&ctx.app, patch, control::Origin::Rest)
         .map(Json)
         .map_err(|e| {
             log::warn!("REST: Einstellung nicht uebernommen: {e}");

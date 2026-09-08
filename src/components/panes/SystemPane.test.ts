@@ -28,6 +28,7 @@ const CONFIG = {
   language: 'de',
   cache: { maxBytes: 2_000_000_000, quality: 'standard' },
   remote: { enabled: false, port: 8090 },
+  upnp: { enabled: false, port: 8128, udn: 'uuid:test', friendlyName: 'Slowshow' },
   mqtt: { enabled: false, host: '', port: 1883, username: '', baseTopic: 'slowshow' },
   sources: [],
 } as unknown as AppConfig

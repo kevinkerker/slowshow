@@ -320,16 +320,16 @@ pub fn handle_command(app: &AppHandle, topics: &Topics, topic: &str, payload: &s
     match name {
         "slideshow" => {
             if let Some(on) = control::parse_switch(payload) {
-                control::set_slideshow(app, on);
+                control::set_slideshow(app, on, control::Origin::Mqtt);
             }
         }
         "screen" => {
             if let Some(on) = control::parse_switch(payload) {
-                control::set_screen(app, on);
+                control::set_screen(app, on, control::Origin::Mqtt);
             }
         }
-        "next" => control::next_slide(app),
-        "prev" => control::prev_slide(app),
+        "next" => control::next_slide(app, control::Origin::Mqtt),
+        "prev" => control::prev_slide(app, control::Origin::Mqtt),
         "sync" => {
             // Nicht abwarten: ein Sync über tausende Bilder darf die
             // MQTT-Schleife nicht anhalten.
@@ -380,7 +380,7 @@ pub fn handle_command(app: &AppHandle, topics: &Topics, topic: &str, payload: &s
 }
 
 fn apply_patch(app: &AppHandle, patch: control::ConfigPatch) {
-    if let Err(e) = control::patch_config(app, patch) {
+    if let Err(e) = control::patch_config(app, patch, control::Origin::Mqtt) {
         log::warn!("MQTT: Einstellung nicht übernommen: {e}");
     }
 }

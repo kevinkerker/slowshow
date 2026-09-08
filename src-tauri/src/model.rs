@@ -335,6 +335,40 @@ impl Default for RemoteConfig {
     }
 }
 
+/// Der Rahmen als DLNA-Medienrenderer (E-47).
+///
+/// Voreingestellt **an**, anders als die REST-Steuerung: der Sinn der Sache
+/// ist, dass Home Assistant den Rahmen ohne einen Handgriff findet. Was das
+/// preisgibt, ist Bedienung im eigenen Netz — Diashow, Bildwechsel,
+/// Helligkeit, Nachtmodus — und das laufende Foto als Cover. Keine Daten,
+/// keine Einstellungen, kein Sync. Wer das nicht will, schaltet es aus.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct UpnpConfig {
+    pub enabled: bool,
+    /// HTTP-Port fuer Beschreibung, Steuerung und Cover. SSDP selbst laeuft
+    /// immer auf 1900, das gibt der Standard vor.
+    pub port: u16,
+    /// Eindeutige Kennung `uuid:…`. Wird beim ersten Laden erzeugt und dann
+    /// behalten — Home Assistant erkennt den Rahmen daran wieder. Ein neuer
+    /// Wert je Start hiesse jeden Tag ein „neues Geraet".
+    pub udn: String,
+    /// Wie der Rahmen sich in Home Assistant nennt.
+    pub friendly_name: String,
+}
+
+impl Default for UpnpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            port: 8128,
+            // Leer heisst: beim naechsten `clamp` erzeugen und speichern.
+            udn: String::new(),
+            friendly_name: "Slowshow".into(),
+        }
+    }
+}
+
 /// MQTT-Anbindung an Home Assistant (FA-55).
 ///
 /// Das Passwort steht bewusst nicht hier, sondern verschluesselt in der
@@ -394,6 +428,8 @@ pub struct AppConfig {
     pub remote: RemoteConfig,
     #[serde(default)]
     pub mqtt: MqttConfig,
+    #[serde(default)]
+    pub upnp: UpnpConfig,
     /// Zwei Hochformatbilder nebeneinander (FA-08).
     #[serde(default)]
     pub pair_mode: bool,
@@ -444,6 +480,7 @@ impl Default for AppConfig {
             cache: CacheConfig::default(),
             remote: RemoteConfig::default(),
             mqtt: MqttConfig::default(),
+            upnp: UpnpConfig::default(),
             pair_mode: false,
             ken_burns: false,
             protect_settings: true,
@@ -479,6 +516,15 @@ impl AppConfig {
         }
         if self.mqtt.base_topic.trim().is_empty() {
             self.mqtt.base_topic = "slowshow".into();
+        }
+        if self.upnp.port == 0 {
+            self.upnp.port = 8128;
+        }
+        if self.upnp.friendly_name.trim().is_empty() {
+            self.upnp.friendly_name = "Slowshow".into();
+        }
+        if self.upnp.udn.trim().is_empty() {
+            self.upnp.udn = format!("uuid:{}", crate::upnp::new_uuid());
         }
         for s in &mut self.sources {
             s.sync_interval_minutes = s.sync_interval_minutes.clamp(5, 10_080);
