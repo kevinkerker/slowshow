@@ -163,3 +163,49 @@ describe('App-Start', () => {
     wrapper.unmount()
   })
 })
+
+/**
+ * Diashow-Seite nach v1.2 (E-64, 5b der Übergabe an Claude Design).
+ */
+describe('Diashow', () => {
+  async function start() {
+    await router.push('/')
+    await router.isReady()
+    const wrapper = mount(App, { global: { plugins: [router, i18n] }, attachTo: document.body })
+    await flushPromises()
+    await flushPromises()
+    return wrapper
+  }
+
+  it('bleibt dunkel, auch wenn das System hell eingestellt ist', async () => {
+    // Die Klasse setzt den dunklen Tokensatz; ohne sie folgte die Diashow im
+    // hellen Systembild den Einstellungen und würde nachts hell.
+    const wrapper = await start()
+    expect(wrapper.get('.slideshow').classes()).toContain('ss-always-dark')
+    wrapper.unmount()
+  })
+
+  it('zeigt eine einzelne wartende Aufnahme in der Einzahl', async () => {
+    vi.spyOn(api, 'quarantineCount').mockResolvedValue(1)
+    const wrapper = await start()
+    expect(wrapper.get('.waiting').text()).toBe('1 Foto wartet auf Freigabe')
+    wrapper.unmount()
+  })
+
+  it('führt vom Hinweis auf wartende Fotos in den Bild-Browser', async () => {
+    // Vorher öffnete der Hinweis die Einstellungen bei den Quellen, wo von
+    // den wartenden Fotos nichts zu sehen ist.
+    vi.spyOn(api, 'quarantineCount').mockResolvedValue(3)
+    vi.spyOn(api, 'imagePage').mockResolvedValue({ entries: [], total: 0 } as never)
+    const wrapper = await start()
+    expect(wrapper.get('.waiting').text()).toBe('3 Fotos warten auf Freigabe')
+
+    await wrapper.get('.waiting').trigger('click')
+    // Die Einstellungen werden nachgeladen (router/index.ts) — das dauert
+    // laenger als ein Durchlauf der Mikroaufgaben.
+    await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/settings'))
+    expect(router.currentRoute.value.query).toEqual({ pane: 'images', filter: 'quarantine' })
+    wrapper.unmount()
+    await router.push('/')
+  })
+})

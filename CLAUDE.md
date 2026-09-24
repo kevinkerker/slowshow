@@ -30,9 +30,16 @@ Aenderungen per `npm run android:patch` einspielen.
 
 ## Design
 
-Verbindlich ist E-13 und `slowshow-app-design.html` (Canvas mit 4 Artboards).
-Farben und Typografie ausschliesslich ueber die Tokens in `src/styles/tokens.css`.
+Verbindlich sind E-13 mit E-58 bis E-64 und der Canvas in `notes/design-handoff-v1.2/canvas/`
+(51 Artboards, Uebersicht `Slowshow App-Design.dc.html`, Anordnung in `canvas.json`).
+Farben, Schriftgroessen, Abstaende und Radien ausschliesslich ueber die Tokens in `src/styles/tokens.css`.
 Schriften werden **lokal gebuendelt**, nie von Google Fonts geladen (NF-04, Offlinebetrieb FA-26).
+
+- Knoepfe ueber `SsButton` / `SsIconButton` (E-58), keine eigenen Knopfstile in Komponenten.
+- Rueckfragen ueber `confirm()` aus `src/composables/useConfirm.ts` (E-59), nie `window.confirm`.
+- Rueckmeldungen ueber `useFeedback` und `SsFeedback`, neben dem Ausloeser (E-62).
+- Einstellungen folgen hell/dunkel des Systems (E-64). Die Diashow und alles, was auf einem Foto
+  liegt, traegt `.ss-always-dark`. `--ss-accent` nie als Knopfflaeche, dafuer `--ss-accent-fill`.
 
 ## Commits
 

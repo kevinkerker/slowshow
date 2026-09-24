@@ -6,7 +6,8 @@
 // mit ins APK. Dieses Skript läuft einmal beim Einrichten des Projekts,
 // nie im Betrieb.
 //
-//     node scripts/fetch-fonts.mjs
+//     node scripts/fetch-fonts.mjs            # fehlende Dateien holen
+//     node scripts/fetch-fonts.mjs --force    # alle neu holen
 //
 // Lizenz: Instrument Sans und Cormorant Garamond stehen unter der SIL Open
 // Font License 1.1 — Apache-2.0-verträglich (RB-05). Die Lizenztexte landen
@@ -15,9 +16,11 @@
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { SUBSET, woff2ForSubset } from './lib/fonts.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const outDir = resolve(root, 'public/fonts')
+const force = process.argv.includes('--force')
 
 // Google Fonts liefert je nach User-Agent unterschiedliche Formate.
 // Mit einem modernen UA bekommen wir woff2.
@@ -39,16 +42,10 @@ const FONTS = [
   },
 ]
 
-/** Zieht die erste woff2-URL aus einem Google-Fonts-Stylesheet. */
-function firstWoff2(css) {
-  const match = css.match(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+\.woff2)\)/)
-  return match ? match[1] : null
-}
-
 async function fetchFont({ file, css }) {
   const target = resolve(outDir, file)
-  if (existsSync(target)) {
-    console.log(`  ${file} — bereits vorhanden, übersprungen`)
+  if (existsSync(target) && !force) {
+    console.log(`  ${file} — bereits vorhanden, übersprungen (--force lädt neu)`)
     return
   }
 
@@ -57,8 +54,10 @@ async function fetchFont({ file, css }) {
     throw new Error(`Stylesheet für ${file}: HTTP ${cssResponse.status}`)
   }
 
-  const url = firstWoff2(await cssResponse.text())
-  if (!url) throw new Error(`Keine woff2-URL im Stylesheet für ${file} gefunden`)
+  // Ausdrücklich der Zeichenvorrat `latin`, nicht die erste Datei — siehe
+  // `lib/fonts.mjs`, warum das den ganzen Unterschied macht.
+  const url = woff2ForSubset(await cssResponse.text())
+  if (!url) throw new Error(`Kein Block „${SUBSET}" im Stylesheet für ${file} gefunden`)
 
   const fontResponse = await fetch(url, { headers: { 'User-Agent': UA } })
   if (!fontResponse.ok) throw new Error(`${file}: HTTP ${fontResponse.status}`)

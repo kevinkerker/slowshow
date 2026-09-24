@@ -4,7 +4,8 @@ import { mount } from '@vue/test-utils'
 import ImagesPane from './ImagesPane.vue'
 import { i18n } from '@/lib/i18n'
 import * as api from '@/lib/api'
-import type { CacheEntry } from '@/lib/types'
+import { useConfigStore } from '@/stores/config'
+import type { AppConfig, CacheEntry } from '@/lib/types'
 
 /**
  * Freigeben wartender Fotos (F4, E-35).
@@ -100,7 +101,7 @@ describe('ImagesPane — wartende Fotos freigeben', () => {
     await w.findAll('.cell')[0].trigger('click')
     await w.vm.$nextTick()
 
-    await w.get('.release .primary').trigger('click')
+    await w.get('.release .ss-btn--primary').trigger('click')
     await new Promise((r) => setTimeout(r, 0))
 
     expect(release).toHaveBeenCalledWith('a', false)
@@ -113,7 +114,7 @@ describe('ImagesPane — wartende Fotos freigeben', () => {
     await w.findAll('.cell')[0].trigger('click')
     await w.vm.$nextTick()
 
-    await w.get('.release .secondary').trigger('click')
+    await w.get('.release .ss-btn--secondary').trigger('click')
     await new Promise((r) => setTimeout(r, 0))
 
     expect(release).toHaveBeenCalledWith('a', true)
@@ -127,7 +128,7 @@ describe('ImagesPane — wartende Fotos freigeben', () => {
     await w.findAll('.cell')[1].trigger('click')
     await w.vm.$nextTick()
 
-    expect(w.get('.release .secondary').text()).toContain('werbung@shop.de')
+    expect(w.get('.release .ss-btn--secondary').text()).toContain('werbung@shop.de')
   })
 
   it('laesst sich abbrechen, ohne etwas freizugeben', async () => {
@@ -136,7 +137,7 @@ describe('ImagesPane — wartende Fotos freigeben', () => {
     await w.findAll('.cell')[0].trigger('click')
     await w.vm.$nextTick()
 
-    await w.get('.release .ghost').trigger('click')
+    await w.get('.release .ss-btn--ghost').trigger('click')
     await w.vm.$nextTick()
 
     expect(release).not.toHaveBeenCalled()
@@ -149,5 +150,49 @@ describe('ImagesPane — wartende Fotos freigeben', () => {
     const w = await pane()
     expect(w.findAll('.cell')[0].get('.sender').text()).toBe('oma@example.org')
     expect(w.findAll('.cell')[0].find('.taken').exists()).toBe(true)
+  })
+})
+
+/**
+ * Öffnen direkt in der Quarantäne.
+ *
+ * Der Hinweis „Fotos warten auf Freigabe" in der Diashow führte in die
+ * Einstellungen bei den Quellen — dort, wo von den wartenden Fotos nichts zu
+ * sehen ist. Jetzt öffnet er den Bild-Browser gleich mit dem richtigen Filter.
+ */
+describe('ImagesPane — Startfilter', () => {
+  it('lädt gleich die wartenden Fotos, wenn danach gefragt wird', async () => {
+    const page = vi.spyOn(api, 'imagePage').mockResolvedValue(SEITE as never)
+    const senders = vi.spyOn(api, 'allowedSenders').mockResolvedValue([
+      { address: 'oma@example.org', photoCount: 3 },
+    ])
+    useConfigStore().config = {
+      language: 'de',
+      sources: [{ id: 'post', name: 'Postfach', kind: { type: 'mail' } }],
+    } as unknown as AppConfig
+
+    const w = mount(ImagesPane, {
+      props: { initialFilter: 'quarantine' },
+      global: { plugins: [i18n] },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+    await w.vm.$nextTick()
+
+    expect(page).toHaveBeenCalledWith(0, 200, 'quarantine')
+    expect(w.get('.ss-segment.active').text()).toBe('Wartet auf Freigabe')
+    // Die Zahl der freigegebenen Absender gehört zu diesem Filter und wird
+    // auch beim direkten Einstieg geladen, nicht erst beim Umschalten.
+    expect(senders).toHaveBeenCalledWith('post')
+    expect(w.text()).toContain('1 Absender freigegeben')
+  })
+
+  it('bleibt bei einem unbekannten Filter bei „Alle"', async () => {
+    const page = vi.spyOn(api, 'imagePage').mockResolvedValue(SEITE as never)
+    mount(ImagesPane, {
+      props: { initialFilter: 'gibtsnicht' as never },
+      global: { plugins: [i18n] },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(page).toHaveBeenCalledWith(0, 200, 'all')
   })
 })

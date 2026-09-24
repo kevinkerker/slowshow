@@ -1,14 +1,17 @@
 <script setup lang="ts">
 /**
- * Eine Quelle in der Liste (Artboard „Einstellungen · Quellen").
+ * Eine Quelle in der Liste (Artboard S1, Maße nach `Thema-Dunkel-Quellen`).
  *
  * Symbol, Name, Statuszeile und Schalter — der Schalter steuert direkt, ob die
  * Quelle in die Diashow einfließt (FA-25).
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import SsFeedback from './SsFeedback.vue'
+import SsIconButton from './SsIconButton.vue'
 import ToggleSwitch from './ToggleSwitch.vue'
 import { formatRelativeTime } from '@/lib/format'
+import type { FeedbackState } from '@/composables/useFeedback'
 import type { Source, SyncProgress } from '@/lib/types'
 
 const props = defineProps<{
@@ -27,6 +30,13 @@ const props = defineProps<{
    * jemand sich wundert, warum ein Ordner leer bleibt.
    */
   error?: string | null
+  /**
+   * Ergebnis des letzten Abgleichs von Hand (E-62).
+   *
+   * Steht in der Karte, weil dort der Auslöser sitzt; vorher erschien es unter
+   * der Liste, weit weg von der Quelle, um die es ging.
+   */
+  feedback?: Readonly<FeedbackState> | null
 }>()
 
 const emit = defineEmits<{
@@ -171,6 +181,7 @@ const iconPath = computed(() => {
       <div class="name">{{ source.name }}</div>
       <div class="status">{{ status }}</div>
       <div v-if="error && !syncing" class="status-error">{{ error }}</div>
+      <SsFeedback v-if="!syncing" :feedback="feedback ?? null" />
       <!-- Schmaler Balken statt Zahlenkolonne: zeigt auf einen Blick, ob es
            vorangeht (der eigentliche Zweck waehrend eines langen Laufs). -->
       <div v-if="syncing" class="progress">
@@ -179,40 +190,20 @@ const iconPath = computed(() => {
     </div>
 
     <div class="actions">
-      <button
-        class="action"
-        :disabled="syncing"
-        :aria-label="t('sources.syncNow')"
-        :title="t('sources.syncNow')"
-        @click="emit('sync')"
-      >
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          :class="{ spinning: syncing }"
-        >
+      <SsIconButton class="action-sync" :label="t('sources.syncNow')" :busy="syncing" @click="emit('sync')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M20 11 A8 8 0 1 0 18.5 16" />
           <path d="M20 5 L20 11 L14.5 11" />
         </svg>
-      </button>
+      </SsIconButton>
 
-      <button
-        class="action"
-        :aria-label="t('sources.edit')"
-        :title="t('sources.edit')"
-        @click="emit('edit')"
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <SsIconButton class="action-edit" :label="t('sources.edit')" @click="emit('edit')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 20 L4 16 L16 4 L20 8 L8 20 Z" />
         </svg>
-      </button>
+      </SsIconButton>
 
+      <span class="spacer" aria-hidden="true" />
       <ToggleSwitch v-model="enabled" :label="source.name" />
     </div>
   </div>
@@ -220,18 +211,17 @@ const iconPath = computed(() => {
 
 <style scoped>
 .status-error {
-  margin-top: 4px;
-  font-size: 0.85rem;
+  font-size: var(--ss-fs-m);
   color: var(--ss-error);
 }
 
 .card {
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding: 22px 24px;
+  gap: var(--ss-space-2);
+  padding: 20px var(--ss-space-3);
   border: 1px solid var(--ss-border);
-  border-radius: var(--ss-radius-card);
+  border-radius: var(--ss-radius-md);
   background: var(--ss-surface);
   transition: opacity var(--ss-transition);
 }
@@ -248,20 +238,20 @@ const iconPath = computed(() => {
   width: 48px;
   height: 48px;
   flex-shrink: 0;
-  border-radius: 10px;
+  border-radius: var(--ss-radius-md);
   background: var(--ss-surface-accent);
 }
 
 .body {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   flex-grow: 1;
   min-width: 0;
 }
 
 .name {
-  font-size: 16px;
+  font-size: var(--ss-fs-l);
   font-weight: 500;
   color: var(--ss-text-strong);
   overflow: hidden;
@@ -271,9 +261,9 @@ const iconPath = computed(() => {
 
 .progress {
   height: 2px;
-  margin-top: 8px;
+  margin-top: 6px;
   border-radius: var(--ss-radius-pill);
-  background: var(--ss-border);
+  background: var(--ss-border-strong);
   overflow: hidden;
 }
 
@@ -296,7 +286,7 @@ const iconPath = computed(() => {
 }
 
 .status {
-  font-size: 13px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -306,39 +296,13 @@ const iconPath = computed(() => {
 .actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--ss-space-1);
   flex-shrink: 0;
 }
 
-.action {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--ss-touch-target);
-  height: var(--ss-touch-target);
-  border-radius: var(--ss-radius-pill);
-  color: var(--ss-text-muted);
-  transition: color var(--ss-transition), background var(--ss-transition);
-}
-
-.action:active:not(:disabled) {
-  color: var(--ss-accent);
-  background: var(--ss-surface-accent);
-}
-
-.action:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.spinning {
-  animation: spin 1.1s linear infinite;
-  transform-origin: center;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+/* Etwas Luft zwischen den Knöpfen und dem Schalter: das eine löst etwas aus,
+   das andere ist ein Zustand. */
+.spacer {
+  width: var(--ss-space-1);
 }
 </style>

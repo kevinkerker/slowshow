@@ -7,7 +7,11 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useI18n } from 'vue-i18n'
 import SettingRow from '../SettingRow.vue'
+import SsButton from '../SsButton.vue'
+import SsFeedback from '../SsFeedback.vue'
 import ToggleSwitch from '../ToggleSwitch.vue'
+import { confirmAction } from '@/composables/useConfirm'
+import { useFeedback } from '@/composables/useFeedback'
 import * as api from '@/lib/api'
 import { useConfigStore } from '@/stores/config'
 import { formatBytes } from '@/lib/format'
@@ -18,7 +22,21 @@ import { EVENTS, type DatabaseCheck, type MqttStatus, type StorageBreakdown } fr
 
 const { t } = useI18n()
 const store = useConfigStore()
-const notice = ref<string | null>(null)
+
+/**
+ * Rückmeldungen, jede neben ihrem Auslöser (E-62).
+ *
+ * Vorher lief alles über eine einzige Zeile ganz unten bei „Konfiguration" —
+ * auch „Passwort gespeichert" zum MQTT-Feld weit darüber, das dort niemand
+ * mehr sah, der gerade auf „Speichern" getippt hatte.
+ */
+const passwordFeedback = useFeedback()
+const reconnectFeedback = useFeedback()
+const configFeedback = useFeedback()
+const dbFeedback = useFeedback()
+const reportFeedback = useFeedback()
+const copyFeedback = useFeedback()
+
 const mqttPassword = ref('')
 const mqttHasPassword = ref(false)
 const mqttReconnecting = ref(false)
@@ -64,8 +82,9 @@ async function reconnectMqtt() {
   mqttReconnecting.value = true
   try {
     mqtt.value = await api.mqttReconnect()
+    reconnectFeedback.clear()
   } catch (e) {
-    flash(e instanceof Error ? e.message : String(e))
+    reconnectFeedback.error(message(e))
   } finally {
     mqttReconnecting.value = false
   }
@@ -77,9 +96,9 @@ async function saveMqttPassword() {
     await api.setMqttPassword(mqttPassword.value)
     mqttHasPassword.value = mqttPassword.value.length > 0
     mqttPassword.value = ''
-    flash(t('system.mqttPasswordSaved'))
+    passwordFeedback.ok(t('system.mqttPasswordSaved'))
   } catch (e) {
-    flash(e instanceof Error ? e.message : String(e))
+    passwordFeedback.error(message(e))
   }
 }
 
@@ -90,9 +109,8 @@ const locale = computed(() => localeTag(cfg.value?.language ?? 'auto'))
 const CACHE_SIZES_GB = [0.5, 1, 2, 4, 8, 16]
 const LANGUAGES: Language[] = ['auto', 'de', 'en']
 
-function flash(message: string) {
-  notice.value = message
-  setTimeout(() => (notice.value = null), 5000)
+function message(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
 }
 
 // ── Speicher, Datenbank, Diagnose (Wartung F9–F11, E-31) ────────────────────
@@ -101,10 +119,7 @@ function flash(message: string) {
 const breakdown = ref<StorageBreakdown | null>(null)
 const dbCheck = ref<DatabaseCheck | null>(null)
 const dbBusy = ref(false)
-const dbNotice = ref<string | null>(null)
 const report = ref<string | null>(null)
-const reportNotice = ref<string | null>(null)
-const reportError = ref<string | null>(null)
 
 async function loadBreakdown() {
   try {
@@ -117,9 +132,11 @@ async function loadBreakdown() {
 
 async function runCheck() {
   dbBusy.value = true
-  dbNotice.value = null
+  dbFeedback.clear()
   try {
     dbCheck.value = await api.checkDatabase()
+  } catch (e) {
+    dbFeedback.error(message(e))
   } finally {
     dbBusy.value = false
   }
@@ -128,24 +145,26 @@ async function runCheck() {
 async function runRepair() {
   const c = dbCheck.value
   if (!c) return
-  if (
-    !confirm(
-      t('system.databaseRepairAsk', {
-        orphan: c.orphanFiles.length + c.orphanThumbs.length,
-        missing: c.missingFiles.length,
-      }),
-    )
+  const go = await confirmAction(
+    t('system.databaseRepairTitle'),
+    t('system.databaseRepairBody', {
+      orphan: c.orphanFiles.length + c.orphanThumbs.length,
+      missing: c.missingFiles.length,
+    }),
+    t('system.databaseRepair'),
   )
-    return
+  if (!go) return
 
   dbBusy.value = true
   try {
     const frei = await api.repairDatabase()
-    dbNotice.value = t('system.databaseRepaired', { bytes: formatBytes(frei, locale.value) })
+    dbFeedback.ok(t('system.databaseRepaired', { bytes: formatBytes(frei, locale.value) }))
     // Neu pruefen statt das alte Ergebnis stehen zu lassen: sonst boete die
     // Oberflaeche weiter „Aufraeumen" fuer etwas an, das schon weg ist.
     dbCheck.value = await api.checkDatabase()
     await loadBreakdown()
+  } catch (e) {
+    dbFeedback.error(message(e))
   } finally {
     dbBusy.value = false
   }
@@ -153,8 +172,8 @@ async function runRepair() {
 
 /** Erzeugt den Bericht und zeigt ihn, bevor er irgendwo hingeht (F11). */
 async function makeReport() {
-  reportNotice.value = null
-  reportError.value = null
+  copyFeedback.clear()
+  reportFeedback.clear()
   // Geraet und Fassung aus der WebView-Kennung statt aus einem Plugin: fuer
   // zwei Zeichenketten eine Abhaengigkeit samt Android-Anteil aufzunehmen
   // stuende in keinem Verhaeltnis (siehe `lib/device.ts`).
@@ -165,7 +184,7 @@ async function makeReport() {
     // Ohne diesen Zweig blieb ein Fehlschlag unsichtbar: die Zusage wurde
     // abgelehnt, niemand fing sie auf, und die Schaltflaeche tat scheinbar
     // nichts. Am Geraet zweimal getippt, ohne eine einzige Spur.
-    reportError.value = e instanceof Error ? e.message : String(e)
+    reportFeedback.error(message(e))
   }
 }
 
@@ -173,9 +192,9 @@ async function copyReport() {
   if (!report.value) return
   try {
     await navigator.clipboard.writeText(report.value)
-    reportNotice.value = t('system.diagnosticsCopied')
+    copyFeedback.ok(t('system.diagnosticsCopied'))
   } catch (e) {
-    reportNotice.value = String(e)
+    copyFeedback.error(message(e))
   }
 }
 
@@ -200,14 +219,14 @@ async function exportConfig() {
 
     if (await isAvailable()) {
       const name = await saveTextFile(backupFileName(), json)
-      if (name) flash(t('system.exportedFile', { name }))
+      if (name) configFeedback.ok(t('system.exportedFile', { name }))
       return
     }
 
     await navigator.clipboard.writeText(json)
-    flash(t('system.exported'))
+    configFeedback.ok(t('system.exported'))
   } catch (e) {
-    flash(t('system.exportFailed', { error: e instanceof Error ? e.message : String(e) }))
+    configFeedback.error(t('system.exportFailed', { error: message(e) }))
   }
 }
 
@@ -226,9 +245,9 @@ async function importConfig() {
 
     await api.importConfig(json)
     await store.refreshStats()
-    flash(t('system.imported'))
+    configFeedback.ok(t('system.imported'))
   } catch (e) {
-    flash(t('system.importFailed', { error: e instanceof Error ? e.message : String(e) }))
+    configFeedback.error(t('system.importFailed', { error: message(e) }))
   }
 }
 
@@ -344,9 +363,9 @@ async function importConfig() {
       </div>
 
       <SettingRow :label="t('system.database')" :hint="t('system.databaseHint')">
-        <button class="secondary" :disabled="dbBusy" @click="runCheck">
+        <SsButton variant="secondary" :busy="dbBusy" @click="runCheck">
           {{ t('system.databaseCheck') }}
-        </button>
+        </SsButton>
       </SettingRow>
 
       <p v-if="dbCheck" class="db-result">
@@ -361,19 +380,22 @@ async function importConfig() {
               bytes: formatBytes(dbCheck.reclaimableBytes, locale),
             })
           }}
-          <button class="danger inline" :disabled="dbBusy" @click="runRepair">
+          <SsButton variant="danger" :disabled="dbBusy" @click="runRepair">
             {{ t('system.databaseRepair') }}
-          </button>
+          </SsButton>
         </template>
+        <SsFeedback :feedback="dbFeedback.feedback.value" />
       </p>
-      <p v-if="dbNotice" class="notice">{{ dbNotice }}</p>
+      <p v-else-if="dbFeedback.feedback.value" class="db-result">
+        <SsFeedback :feedback="dbFeedback.feedback.value" />
+      </p>
 
       <SettingRow :label="t('system.diagnostics')" :hint="t('system.diagnosticsHint')">
-        <button class="secondary" @click="makeReport">
+        <SsFeedback :feedback="reportFeedback.feedback.value" />
+        <SsButton variant="secondary" @click="makeReport">
           {{ t('system.diagnosticsShow') }}
-        </button>
+        </SsButton>
       </SettingRow>
-      <p v-if="reportError" class="db-result error">{{ reportError }}</p>
     </section>
 
     <!-- Der Bericht wird gezeigt, bevor er irgendwohin geht: was das Geraet
@@ -381,10 +403,11 @@ async function importConfig() {
     <div v-if="report" class="backdrop" @click.self="report = null">
       <div class="report" role="dialog" aria-modal="true">
         <pre>{{ report }}</pre>
-        <p v-if="reportNotice" class="notice">{{ reportNotice }}</p>
         <div class="actions">
-          <button class="primary" @click="copyReport">{{ t('system.diagnosticsCopy') }}</button>
-          <button class="secondary" @click="report = null">{{ t('system.diagnosticsClose') }}</button>
+          <SsButton variant="primary" @click="copyReport">{{ t('system.diagnosticsCopy') }}</SsButton>
+          <SsFeedback :feedback="copyFeedback.feedback.value" />
+          <span class="spacer" />
+          <SsButton variant="secondary" @click="report = null">{{ t('system.diagnosticsClose') }}</SsButton>
         </div>
       </div>
     </div>
@@ -505,8 +528,9 @@ async function importConfig() {
         >
           <div class="password-row">
             <input v-model="mqttPassword" type="password" autocomplete="off" />
-            <button class="secondary" @click="saveMqttPassword">{{ t('common.save') }}</button>
+            <SsButton variant="secondary" @click="saveMqttPassword">{{ t('common.save') }}</SsButton>
           </div>
+          <SsFeedback :feedback="passwordFeedback.feedback.value" />
         </SettingRow>
 
         <SettingRow :label="t('system.mqttBaseTopic')" :hint="t('system.mqttBaseTopicHint')" stacked>
@@ -548,9 +572,11 @@ async function importConfig() {
               {{ mqtt.connected ? t('system.mqttConnected') : t('system.mqttDisconnected') }}
             </span>
           </div>
-          <button class="secondary" :disabled="mqttReconnecting" @click="reconnectMqtt">
+          <span class="spacer" />
+          <SsFeedback :feedback="reconnectFeedback.feedback.value" />
+          <SsButton variant="secondary" :busy="mqttReconnecting" @click="reconnectMqtt">
             {{ mqttReconnecting ? t('system.mqttReconnecting') : t('system.mqttReconnect') }}
-          </button>
+          </SsButton>
         </div>
 
         <p v-if="!mqtt.connected && mqtt.lastError" class="mqtt-error">
@@ -562,10 +588,10 @@ async function importConfig() {
     <section>
       <h3 class="ss-label">{{ t('system.config') }}</h3>
       <div class="buttons">
-        <button class="secondary" @click="exportConfig">{{ t('system.export') }}</button>
-        <button class="secondary" @click="importConfig">{{ t('system.import') }}</button>
+        <SsButton variant="secondary" @click="exportConfig">{{ t('system.export') }}</SsButton>
+        <SsButton variant="secondary" @click="importConfig">{{ t('system.import') }}</SsButton>
+        <SsFeedback :feedback="configFeedback.feedback.value" />
       </div>
-      <p v-if="notice" class="notice">{{ notice }}</p>
     </section>
 
     <!-- E-45: Der Rahmen wird von Android abgeraeumt, sobald er nicht mehr im
@@ -592,8 +618,8 @@ async function importConfig() {
 .breakdown {
   display: flex;
   flex-wrap: wrap;
-  gap: 24px;
-  margin-bottom: 18px;
+  gap: var(--ss-space-3);
+  margin: var(--ss-space-2) 0;
 }
 
 .breakdown .col {
@@ -605,7 +631,7 @@ async function importConfig() {
   list-style: none;
   margin: 6px 0 0;
   padding: 0;
-  font-size: 13px;
+  font-size: var(--ss-fs-m);
 }
 
 .breakdown li {
@@ -634,19 +660,10 @@ async function importConfig() {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
-}
-
-.db-result.error {
-  color: var(--ss-error);
-}
-
-.db-result .inline {
-  padding: 4px 12px;
-  font-size: 13px;
 }
 
 /* Ohne diese Regel stand der Bericht inline unter der Schaltflaeche — am
@@ -659,8 +676,8 @@ async function importConfig() {
   z-index: 40;
   display: grid;
   place-items: center;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.72);
+  padding: var(--ss-space-2);
+  background: var(--ss-dialog-scrim);
 }
 
 .report {
@@ -668,11 +685,12 @@ async function importConfig() {
   max-height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 20px;
-  border: 1px solid var(--ss-border-soft);
-  border-radius: 16px;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-3);
+  border: 1px solid var(--ss-border);
+  border-radius: var(--ss-radius-lg);
   background: var(--ss-surface);
+  box-shadow: var(--ss-shadow-dialog);
 }
 
 /* Der Bericht ist Fliesstext in fester Breite — umgebrochen waere die
@@ -681,14 +699,19 @@ async function importConfig() {
   margin: 0;
   overflow: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-size: var(--ss-fs-s);
   line-height: 1.45;
   white-space: pre;
 }
 
 .report .actions {
   display: flex;
-  gap: 10px;
+  align-items: center;
+  gap: var(--ss-space-1);
+}
+
+.spacer {
+  flex-grow: 1;
 }
 
 .pane {
@@ -697,29 +720,28 @@ async function importConfig() {
 }
 
 section {
-  margin-bottom: 28px;
+  margin-bottom: var(--ss-space-4);
 }
 
 section > .ss-label {
   display: block;
-  margin-bottom: 6px;
 }
 
 .usage {
   display: flex;
   justify-content: space-between;
-  padding: 12px 0;
-  font-size: 14px;
+  padding: var(--ss-space-2) 0 var(--ss-space-1);
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-body);
 }
 
 .dim {
   color: var(--ss-text-dim);
-  font-size: 13px;
+  font-size: var(--ss-fs-m);
 }
 
 .narrow {
-  width: 150px;
+  width: 160px;
 }
 
 .slider {
@@ -729,53 +751,39 @@ section > .ss-label {
 }
 
 .slider input {
-  width: 180px;
-  accent-color: var(--ss-accent);
+  width: 240px;
 }
 
 .value {
-  font-size: 14px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
-  min-width: 32px;
+  min-width: 48px;
   font-variant-numeric: tabular-nums;
 }
 
 .buttons {
   display: flex;
-  gap: 10px;
-  padding-top: 10px;
-}
-
-.secondary {
-  padding: 0 22px;
-  border: 1px solid var(--ss-border-strong);
-  border-radius: var(--ss-radius-pill);
-  color: var(--ss-text-body);
-  font-size: 15px;
-  font-weight: 500;
-}
-
-.secondary:active {
-  background: var(--ss-surface-accent);
-  color: var(--ss-accent);
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ss-space-1);
+  padding-top: var(--ss-space-2);
 }
 
 .password-row {
   display: flex;
-  gap: 10px;
+  gap: var(--ss-space-1);
 }
 
 .mqtt-state {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding-top: 6px;
+  gap: var(--ss-space-2);
+  padding-top: var(--ss-space-1);
 }
 
 .mqtt-error {
   padding-top: 6px;
-  font-size: 13px;
+  font-size: var(--ss-fs-m);
   line-height: 1.4;
   color: var(--ss-error);
   /* Broker-Fehlermeldungen sind manchmal lang und ohne Leerzeichen. */
@@ -786,8 +794,7 @@ section > .ss-label {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 0 4px;
-  font-size: 13px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
 }
 
@@ -806,19 +813,13 @@ section > .ss-label {
   background: var(--ss-accent);
 }
 
-.notice {
-  padding-top: 12px;
-  font-size: 13px;
-  color: var(--ss-text-dim);
-}
-
 .about {
-  padding-top: 8px;
+  padding-top: var(--ss-space-1);
   opacity: 0.8;
 }
 
 .about .ss-wordmark {
-  font-size: 22px;
+  font-size: var(--ss-fs-xl);
   margin-bottom: 6px;
 }
 </style>

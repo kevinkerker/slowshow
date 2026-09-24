@@ -6,8 +6,13 @@
  *  1. Konfiguration laden, bevor irgendeine Ansicht rendert
  *  2. Bildschirm wachhalten (FA-50)
  *  3. Weiches Abdunkeln über ein Overlay (FA-52, FA-53)
+ *
+ * Dazu hält sie den Rückfragedialog (E-59), den alle Bereiche teilen.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import SsConfirmHost from '@/components/SsConfirmHost.vue'
+import { installConfirmGuard } from '@/composables/useConfirm'
 import { useConfigStore } from '@/stores/config'
 import { keepAwake, releaseAwake } from '@/lib/wake'
 import { dimOpacity as computeDim } from '@/lib/dim'
@@ -16,6 +21,10 @@ import { applyOrientation, reportDisplaySize, setFrameOrientation } from '@/lib/
 
 const store = useConfigStore()
 const loaded = ref(false)
+
+// Zurück-Taste bricht eine offene Rückfrage ab, statt die Einstellungen zu
+// verlassen (E-59).
+const removeConfirmGuard = installConfirmGuard(useRouter())
 
 /**
  * Software-Abdunkelung als schwarzes Overlay.
@@ -72,6 +81,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(async () => {
+  removeConfirmGuard()
   portraitQuery.removeEventListener('change', reportOrientation)
   store.dispose()
   await releaseAwake()
@@ -79,8 +89,13 @@ onBeforeUnmount(async () => {
 </script>
 
 <template>
-  <div class="app">
+  <!-- Bis die Konfiguration steht, bleibt der Schirm dunkel, auch wenn das
+       System hell eingestellt ist (E-64): ein Rahmen, der beim Einschalten
+       weiß aufblitzt, leuchtet genau im falschen Moment ins Zimmer. -->
+  <div class="app" :class="{ 'ss-always-dark': !loaded }">
     <RouterView v-if="loaded" />
+
+    <SsConfirmHost />
 
     <!-- Liegt über allem, fängt aber keine Berührungen ab: der Rahmen muss
          auch im abgedunkelten Zustand aufweckbar bleiben (FA-41, FA-55). -->
@@ -105,7 +120,7 @@ onBeforeUnmount(async () => {
 .dim {
   position: fixed;
   inset: 0;
-  background: #000;
+  background: var(--ss-bg-night);
   pointer-events: none;
   z-index: 100;
   transition: opacity 1.2s ease;

@@ -23,8 +23,11 @@ import { formatClock } from '@/lib/format'
 import type { ClockStyle } from '@/lib/types'
 
 const props = defineProps<{
-  /** Uhrzeit, ab der die Diashow wieder läuft — "HH:MM". */
-  resumeAt: string
+  /**
+   * Uhrzeit, ab der die Diashow wieder läuft — "HH:MM". `null`, wenn kein
+   * Zeitplan sie bestimmt; dann steht nur „Ruhemodus" da.
+   */
+  resumeAt: string | null
   clockStyle: ClockStyle
   pixelShift: boolean
 }>()
@@ -43,7 +46,9 @@ const time = computed(() => formatClock(now.value))
         <AnalogClock :date="now" />
       </div>
       <div v-else class="time">{{ time }}</div>
-      <div class="label">{{ t('night.restUntil', { time: props.resumeAt }) }}</div>
+      <div class="label">
+        {{ props.resumeAt ? t('night.restUntil', { time: props.resumeAt }) : t('night.resting') }}
+      </div>
     </div>
   </div>
 </template>
@@ -68,7 +73,7 @@ const time = computed(() => formatClock(now.value))
 }
 
 .time {
-  font-size: 120px;
+  font-size: var(--ss-fs-night);
   font-weight: 400;
   line-height: 1;
   color: var(--ss-night-clock);

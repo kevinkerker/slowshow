@@ -1,6 +1,7 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import SourceDialog from './SourceDialog.vue'
+import { CANCEL, confirmRequest, settle } from '@/composables/useConfirm'
 import { i18n } from '@/lib/i18n'
 import * as api from '@/lib/api'
 import type { FetchLogEntry, Source, SourceKind } from '@/lib/types'
@@ -32,6 +33,34 @@ beforeEach(() => {
   vi.spyOn(api, 'fetchLog').mockResolvedValue([])
   vi.spyOn(api, 'onResyncProgress').mockResolvedValue(() => {})
 })
+
+// Eine Rueckfrage, die ein Test offen laesst, bliebe sonst fuer den naechsten
+// stehen — die Rueckfragen teilen sich einen Zustand (E-59).
+afterEach(() => settle(CANCEL))
+
+const flush = () => new Promise((r) => setTimeout(r, 0))
+
+/**
+ * Beantwortet die offene Rueckfrage (E-59) und gibt sie zurueck.
+ *
+ * Der Dialog selbst haengt in `App.vue`; hier zaehlt, was gefragt wird und
+ * was die Antwort bewirkt.
+ */
+async function answer(id: string) {
+  await flush()
+  const request = confirmRequest.value
+  expect(request, 'keine Rueckfrage offen').toBeTruthy()
+  settle(id)
+  await flush()
+  return request!
+}
+
+/** Schaltflaeche nach ihrer Aufschrift — Klassen sind seit E-58 Sache von SsButton. */
+function button(w: { findAll: (s: string) => Array<{ text: () => string }> }, text: string) {
+  const found = w.findAll('button').find((b) => b.text().includes(text))
+  expect(found, `Schaltflaeche „${text}" nicht gefunden`).toBeTruthy()
+  return found as unknown as { trigger: (e: string) => Promise<void> }
+}
 
 const BASE: Omit<Source, 'kind'> = {
   id: 'q1',
@@ -135,12 +164,12 @@ describe('SourceDialog — Felder je Quellenart', () => {
     // sah nichts geschehen (E-31).
     vi.spyOn(api, 'testSource').mockResolvedValue(0)
     const w = form('mail')
-    await w.find('.foot .secondary').trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    await button(w, 'Verbindung testen').trigger('click')
+    await flush()
     await w.vm.$nextTick()
 
     const foot = w.get('.foot')
-    expect(foot.find('.result').exists(), 'Meldung gehoert in die Fusszeile').toBe(true)
+    expect(foot.find('.result .ok').exists(), 'Meldung gehoert in die Fusszeile').toBe(true)
     expect(w.find('.body .result').exists(), 'und nicht mehr in den Rumpf').toBe(false)
   })
 
@@ -149,8 +178,8 @@ describe('SourceDialog — Felder je Quellenart', () => {
     // Sie ging vorher nur ins Protokoll (commands.rs).
     vi.spyOn(api, 'testSource').mockResolvedValue(3)
     const w = form('mail')
-    await w.find('.foot .secondary').trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    await button(w, 'Verbindung testen').trigger('click')
+    await flush()
     await w.vm.$nextTick()
 
     expect(w.get('.foot .result').text()).toContain('3')
@@ -160,12 +189,25 @@ describe('SourceDialog — Felder je Quellenart', () => {
     // WebDAV liefert keine Zahl (`null`) — dann darf dort auch keine stehen.
     vi.spyOn(api, 'testSource').mockResolvedValue(null)
     const w = form('webDav')
-    await w.find('.foot .secondary').trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    await button(w, 'Verbindung testen').trigger('click')
+    await flush()
     await w.vm.$nextTick()
 
     const text = w.get('.foot .result').text()
     expect(text).toBe('Verbindung erfolgreich')
+  })
+
+  it('laesst einen fehlgeschlagenen Test stehen und faerbt ihn als Fehler', async () => {
+    // E-62: Erfolg verblasst, ein Fehler bleibt, bis ein Versuch gelingt.
+    vi.spyOn(api, 'testSource').mockRejectedValue(new Error('Zeitueberschreitung'))
+    const w = form('webDav')
+    await button(w, 'Verbindung testen').trigger('click')
+    await flush()
+    await w.vm.$nextTick()
+
+    const meldung = w.get('.foot .result .error')
+    expect(meldung.text()).toContain('Zeitueberschreitung')
+    expect(meldung.attributes('role')).toBe('alert')
   })
 
   // ── Freigegebene Absender (F4, E-32) ──────────────────────────────────────
@@ -200,48 +242,60 @@ describe('SourceDialog — Felder je Quellenart', () => {
   })
 
   it('fragt vor dem Entfernen nach den vorhandenen Fotos', async () => {
-    // Die Rueckfrage ist der Kern von E-32: "OK" schickt die Bilder zurueck
-    // in die Quarantaene, "Abbrechen" laesst sie sichtbar.
+    // Der Kern von E-32, seit E-59 mit drei benannten Ausgaengen: jede
+    // Aufschrift sagt, was mit den Fotos geschieht.
     const remove = vi.spyOn(api, 'removeAllowedSender').mockResolvedValue(12)
-    vi.stubGlobal('confirm', vi.fn(() => true))
 
     const w = await withSenders([{ address: 'oma@example.org', photoCount: 12 }])
     await w.get('.sender-remove').trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    const frage = await answer('requarantine')
 
+    expect(frage.title).toContain('oma@example.org')
+    expect(frage.body).toContain('12 Fotos')
+    expect(frage.actions.map((a) => a.label)).toEqual([
+      'Entfernen · Fotos bleiben sichtbar',
+      'Entfernen · 12 Fotos zurück in die Quarantäne',
+    ])
     expect(remove).toHaveBeenCalledWith('q1', 'oma@example.org', true)
     expect(w.findAll('.senders li')).toHaveLength(0)
-    vi.unstubAllGlobals()
   })
 
-  it('laesst die Fotos sichtbar, wenn die Rueckfrage verneint wird', async () => {
+  it('laesst die Fotos sichtbar, wenn man das so waehlt', async () => {
     const remove = vi.spyOn(api, 'removeAllowedSender').mockResolvedValue(0)
-    vi.stubGlobal('confirm', vi.fn(() => false))
 
     const w = await withSenders([{ address: 'oma@example.org', photoCount: 12 }])
     await w.get('.sender-remove').trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    await answer('keep')
 
-    // Verneinen heisst hier nicht abbrechen: der Absender geht trotzdem von
-    // der Liste, nur die Bilder bleiben. Ein Rueckgabewert `false` darf den
-    // Aufruf also nicht verschlucken.
+    // Der Absender geht von der Liste, nur die Bilder bleiben.
     expect(remove).toHaveBeenCalledWith('q1', 'oma@example.org', false)
-    vi.unstubAllGlobals()
   })
 
-  it('bricht bei einem Absender ohne Fotos wirklich ab', async () => {
-    // Ohne Fotos gibt es nichts zu entscheiden — dann ist "Abbrechen" ein
-    // echtes Abbrechen und darf nichts entfernen.
+  it('bricht wirklich ab, wenn man abbricht', async () => {
+    // Vorher hiess „Abbrechen" im nativen Dialog „sichtbar lassen", und der
+    // Absender verschwand trotzdem — ein Abbrechen gab es nicht (E-59).
     const remove = vi.spyOn(api, 'removeAllowedSender').mockResolvedValue(0)
-    vi.stubGlobal('confirm', vi.fn(() => false))
 
-    const w = await withSenders([{ address: 'neu@example.org', photoCount: 0 }])
+    const w = await withSenders([{ address: 'oma@example.org', photoCount: 12 }])
     await w.get('.sender-remove').trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    await answer(CANCEL)
 
     expect(remove).not.toHaveBeenCalled()
     expect(w.findAll('.senders li')).toHaveLength(1)
-    vi.unstubAllGlobals()
+  })
+
+  it('bricht bei einem Absender ohne Fotos wirklich ab', async () => {
+    // Ohne Fotos gibt es nichts zu entscheiden — dann gibt es nur Entfernen
+    // oder Abbrechen, und Abbrechen darf nichts entfernen.
+    const remove = vi.spyOn(api, 'removeAllowedSender').mockResolvedValue(0)
+
+    const w = await withSenders([{ address: 'neu@example.org', photoCount: 0 }])
+    await w.get('.sender-remove').trigger('click')
+    const frage = await answer(CANCEL)
+
+    expect(frage.actions).toHaveLength(1)
+    expect(remove).not.toHaveBeenCalled()
+    expect(w.findAll('.senders li')).toHaveLength(1)
   })
 
   it('zeigt die Liste nicht beim Anlegen einer neuen Quelle', async () => {
@@ -382,7 +436,7 @@ describe('SourceDialog — Felder je Quellenart', () => {
     const w = await mitAbruf(lauf(), [lauf(), lauf({ error: 'kaputt' })])
     expect(w.find('.fetch-log').exists()).toBe(false)
 
-    await w.get('.fetch-actions .link').trigger('click')
+    await button(w, 'Abruf-Protokoll').trigger('click')
     expect(w.findAll('.fetch-log li')).toHaveLength(2)
     expect(w.findAll('.fetch-log li')[1].classes()).toContain('bad')
   })
@@ -391,7 +445,7 @@ describe('SourceDialog — Felder je Quellenart', () => {
     // Zwei Postfaecher sind moeglich; das Protokoll der einen gehoert nicht
     // in den Dialog der anderen.
     const w = await mitAbruf(lauf(), [lauf(), lauf({ sourceId: 'fremd' })])
-    await w.get('.fetch-actions .link').trigger('click')
+    await button(w, 'Abruf-Protokoll').trigger('click')
     expect(w.findAll('.fetch-log li')).toHaveLength(1)
   })
 
@@ -408,32 +462,28 @@ describe('SourceDialog — Felder je Quellenart', () => {
     // F8 laeuft bei einem vollen Postfach minutenlang — das gehoert vorher
     // gesagt, samt der Zusicherung, dass die Diashow weiterlaeuft.
     const resync = vi.spyOn(api, 'resyncMailbox').mockResolvedValue(3)
-    const confirmSpy = vi.fn((_t?: string) => true)
-    vi.stubGlobal('confirm', confirmSpy)
 
     const w = await mitAbruf(lauf())
     const knopf = w.findAll('.resync button').find((b) => b.text().includes('neu abgleichen'))
     await knopf!.trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    const frage = await answer('confirm')
 
-    const frage = String(confirmSpy.mock.calls[0]?.[0])
-    expect(frage).toContain('Minuten')
-    expect(frage).toContain('abbrechen')
+    expect(frage.body).toContain('Minuten')
+    expect(frage.body).toContain('abbrechen')
+    // Nicht destruktiv, nur langwierig: kein Knopf in der Gefahrenfarbe.
+    expect(frage.actions[0].variant).toBe('primary')
     expect(resync).toHaveBeenCalledWith('q1')
-    vi.unstubAllGlobals()
   })
 
   it('gleicht nichts ab, wenn die Rueckfrage verneint wird', async () => {
     const resync = vi.spyOn(api, 'resyncMailbox').mockResolvedValue(0)
-    vi.stubGlobal('confirm', vi.fn(() => false))
 
     const w = await mitAbruf(lauf())
     const knopf = w.findAll('.resync button').find((b) => b.text().includes('neu abgleichen'))
     await knopf!.trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    await answer(CANCEL)
 
     expect(resync).not.toHaveBeenCalled()
-    vi.unstubAllGlobals()
   })
 
   it('meldet sich vom Fortschritt wieder ab', async () => {
@@ -442,15 +492,13 @@ describe('SourceDialog — Felder je Quellenart', () => {
     const ab = vi.fn()
     vi.spyOn(api, 'onResyncProgress').mockResolvedValue(ab)
     vi.spyOn(api, 'resyncMailbox').mockResolvedValue(1)
-    vi.stubGlobal('confirm', vi.fn(() => true))
 
     const w = await mitAbruf(lauf())
     const knopf = w.findAll('.resync button').find((b) => b.text().includes('neu abgleichen'))
     await knopf!.trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    await answer('confirm')
 
     expect(ab).toHaveBeenCalled()
-    vi.unstubAllGlobals()
   })
 
   // ── Hinweise zur Absicherung (E-39) ───────────────────────────────────────

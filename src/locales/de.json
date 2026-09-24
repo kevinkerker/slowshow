@@ -16,7 +16,7 @@
     "emptyHint": "Fügen Sie eine Quelle hinzu, um die Diashow zu starten.",
     "addSource": "Quelle hinzufügen",
     "paused": "Pausiert",
-    "waiting": "{n} Fotos warten auf Freigabe",
+    "waiting": "{n} Foto wartet auf Freigabe | {n} Fotos warten auf Freigabe",
     "loading": "Bilder werden vorbereitet …",
     "excludeImage": "Dieses Bild nicht mehr zeigen",
     "excluded": "Bild aus der Diashow entfernt",
@@ -24,7 +24,8 @@
     "holdHint": "Zum Öffnen gedrückt halten"
   },
   "night": {
-    "restUntil": "Ruhemodus bis {time}"
+    "restUntil": "Ruhemodus bis {time}",
+    "resting": "Ruhemodus"
   },
   "orientation": {
     "landscape": "Quer",
@@ -91,7 +92,8 @@
     "scanning": "Durchsuche {path}",
     "edit": "Bearbeiten",
     "remove": "Entfernen",
-    "removeConfirm": "Quelle „{name}\" entfernen? Die Bilder im Cache werden gelöscht, an der Quelle bleibt alles unverändert.",
+    "removeTitle": "Quelle „{name}“ entfernen?",
+    "removeBody": "Die Bilder im Cache werden gelöscht, an der Quelle bleibt alles unverändert.",
     "syncResult": "{added} neu, {updated} aktualisiert, {removed} entfernt",
     "syncNothing": "Keine Änderungen",
     "syncFailed": "Synchronisierung fehlgeschlagen: {error}",
@@ -124,11 +126,14 @@
     "quarantineAllHint": "Auch bekannte Absender warten dann auf einen Tipp am Rahmen.",
     "allowedSenders": "Freigegebene Absender",
     "allowedSendersHint": "Wer hier steht, landet nicht mehr in der Quarantäne.",
-    "allowedSendersEmpty": "Noch niemand freigegeben. Die Liste wächst, wenn du beim Freigeben eines Fotos „Absender vertrauen\" wählst.",
+    "allowedSendersEmpty": "Noch niemand freigegeben. Die Liste wächst, wenn du beim Freigeben eines Fotos „Alle von …“ wählst.",
     "senderPhotos": "{n} Foto | {n} Fotos",
     "removeSender": "Absender entfernen",
-    "removeSenderAsk": "{sender} entfernen?\n\nKünftige Mails warten dann wieder auf Freigabe.\n\nSollen auch die {n} bereits vorhandenen Fotos zurück in die Quarantäne?\n\nOK = ja, zurück in die Quarantäne\nAbbrechen = nein, sichtbar lassen",
-    "removeSenderAskEmpty": "{sender} entfernen?\n\nKünftige Mails warten dann wieder auf Freigabe.",
+    "removeSenderTitle": "{sender} entfernen?",
+    "removeSenderBody": "Künftige Mails warten dann wieder auf Freigabe. Von dieser Adresse ist schon {n} Foto da. | Künftige Mails warten dann wieder auf Freigabe. Von dieser Adresse sind schon {n} Fotos da.",
+    "removeSenderKeep": "Entfernen · Fotos bleiben sichtbar",
+    "removeSenderRequarantine": "Entfernen · {n} Foto zurück in die Quarantäne | Entfernen · {n} Fotos zurück in die Quarantäne",
+    "removeSenderBodyEmpty": "Künftige Mails warten dann wieder auf Freigabe.",
     "senderRemoved": "Absender entfernt",
     "senderRemovedWith": "Absender entfernt · {n} Fotos warten wieder auf Freigabe",
     "maxAttachment": "Größter Anhang (MB)",
@@ -189,7 +194,8 @@
     "fetchLogLine": "{checked} geholt · {added} neu · {known} bekannt",
     "resync": "Postfach neu abgleichen",
     "resyncHint": "Sieht den ganzen Ordner durch und holt, was fehlt. Vorhandene Fotos bleiben unangetastet.",
-    "resyncAsk": "Postfach vollständig neu abgleichen?\\n\\nDer Rahmen sieht jede Nachricht im Ordner durch — das dauert bei einem vollen Postfach mehrere Minuten. Die Diashow läuft weiter, und du kannst jederzeit abbrechen.",
+    "resyncTitle": "Postfach vollständig neu abgleichen?",
+    "resyncBody": "Der Rahmen sieht jede Nachricht im Ordner durch — das dauert bei einem vollen Postfach mehrere Minuten. Die Diashow läuft weiter, und du kannst jederzeit abbrechen.",
     "resyncRunning": "{done} von {total} Nachrichten geprüft · {added} neu",
     "resyncCancel": "Abbrechen",
     "resyncDone": "Neuabgleich fertig · {n} neue Fotos"
@@ -257,7 +263,8 @@
     "restartCycleDone": "Durchlauf beginnt von vorn.",
     "resetHistory": "Anzeige-Historie zurücksetzen",
     "resetHistoryHint": "Setzt Zähler und Zeitpunkte des aktuellen Bestands auf null.",
-    "resetHistoryAsk": "Anzeige-Historie von {n} Fotos zurücksetzen?\\n\\nZähler und Zeitpunkte gehen verloren — die Diashow behandelt danach jedes Bild, als wäre es neu. Die Fotos selbst bleiben.",
+    "resetHistoryTitle": "Anzeige-Historie von {n} Fotos zurücksetzen?",
+    "resetHistoryBody": "Zähler und Zeitpunkte gehen verloren — die Diashow behandelt danach jedes Bild, als wäre es neu. Die Fotos selbst bleiben.",
     "resetHistoryDone": "{n} Fotos zurückgesetzt."
   },
   "schedule": {
@@ -346,7 +353,8 @@
     "databaseClean": "Alles in Ordnung.",
     "databaseFound": "{missing} Einträge ohne Datei · {orphan} Dateien ohne Eintrag · {bytes} freigebbar",
     "databaseRepair": "Aufräumen",
-    "databaseRepairAsk": "Aufräumen?\\n\\n{orphan} Datei(en) ohne Eintrag werden gelöscht, {missing} Eintrag/Einträge ohne Datei aus dem Index entfernt. Fotos, die zur Diashow gehören, bleiben unberührt.",
+    "databaseRepairTitle": "Aufräumen?",
+    "databaseRepairBody": "{orphan} Datei(en) ohne Eintrag werden gelöscht, {missing} Eintrag/Einträge ohne Datei aus dem Index entfernt. Fotos, die zur Diashow gehören, bleiben unberührt.",
     "databaseRepaired": "{bytes} freigegeben.",
     "diagnostics": "Diagnosebericht",
     "diagnosticsHint": "Für Fehlerberichte. Ohne Mailadressen, Servernamen und Dateinamen; Absender erscheinen als „Absender A\".",

@@ -23,7 +23,7 @@ src/                      Vue-3-Frontend — Darstellung und Bedienung
 ├── components/           Bildbühne, Einblendungen, Quellenverwaltung
 ├── stores/               Pinia: Konfiguration und Ablauf der Diashow
 ├── lib/                  Tauri-Brücke, SAF-Zugriff, Formatierung
-└── styles/               Design-Tokens aus slowshow-app-design.html
+└── styles/               Design-Tokens (E-13, E-58 bis E-64)
 
 src-tauri/                Rust-Backend — der eigentliche Kern
 ├── src/

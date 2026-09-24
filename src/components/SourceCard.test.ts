@@ -186,3 +186,59 @@ describe('SourceCard: Fehler des letzten Laufs', () => {
     expect(w.find('.status-error').exists()).toBe(false)
   })
 })
+
+/**
+ * Rückmeldung neben ihrem Auslöser (E-62).
+ *
+ * Das Ergebnis eines Abgleichs von Hand stand vorher als Zeile unter der
+ * ganzen Liste, weit weg von der Quelle, deren Sync-Knopf man gerade getippt
+ * hatte.
+ */
+describe('SourceCard — Rückmeldung', () => {
+  function mitRueckmeldung(props: Record<string, unknown>) {
+    return mount(SourceCard, {
+      props: {
+        source: {
+          id: 'q1',
+          name: 'NAS · Fotoarchiv',
+          kind: KINDS.webDav,
+          enabled: true,
+          subfolders: [],
+          minWidth: 0,
+          minHeight: 0,
+          syncIntervalMinutes: 360,
+          lastSync: null,
+        },
+        photoCount: 0,
+        syncing: false,
+        ...props,
+      },
+      global: { plugins: [i18n] },
+    })
+  }
+
+  it('zeigt das Ergebnis des Abgleichs in der Karte', () => {
+    const w = mitRueckmeldung({
+      feedback: { kind: 'ok', text: '12 neu, 3 aktualisiert, 0 entfernt', id: 1 },
+    })
+    expect(w.get('.body .ss-feedback .ok').text()).toBe('12 neu, 3 aktualisiert, 0 entfernt')
+  })
+
+  it('zeigt kein altes Ergebnis, solange ein neuer Lauf läuft', () => {
+    const w = mitRueckmeldung({
+      syncing: true,
+      feedback: { kind: 'ok', text: 'Keine Änderungen', id: 1 },
+    })
+    expect(w.text()).not.toContain('Keine Änderungen')
+  })
+
+  it('dreht beim Abgleich das Symbol, statt den Knopf blass zu sperren', () => {
+    // E-58: „beschäftigt" ist ein eigener Zustand. Vorher wurde der Knopf
+    // gesperrt und halb durchsichtig — das las sich wie „geht gerade nicht".
+    const w = mitRueckmeldung({ syncing: true })
+    const sync = w.get('.action-sync')
+    expect(sync.attributes('aria-busy')).toBe('true')
+    expect(sync.attributes('disabled')).toBeUndefined()
+    expect(sync.find('.spinning').exists()).toBe(true)
+  })
+})

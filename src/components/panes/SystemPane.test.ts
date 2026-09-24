@@ -1,7 +1,8 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import SystemPane from './SystemPane.vue'
+import { CANCEL, confirmRequest, settle } from '@/composables/useConfirm'
 import { i18n } from '@/lib/i18n'
 import * as api from '@/lib/api'
 import * as saf from '@/lib/saf'
@@ -24,6 +25,8 @@ beforeAll(() => {
   i18n.global.locale.value = 'de'
 })
 
+afterEach(() => settle(CANCEL))
+
 const CONFIG = {
   language: 'de',
   cache: { maxBytes: 2_000_000_000, quality: 'standard' },
@@ -33,10 +36,10 @@ const CONFIG = {
   sources: [],
 } as unknown as AppConfig
 
-function setup() {
+function setup(config: AppConfig = CONFIG) {
   setActivePinia(createPinia())
   const store = useConfigStore()
-  store.config = CONFIG
+  store.config = config
   return mount(SystemPane, { global: { plugins: [i18n] } })
 }
 
@@ -132,7 +135,7 @@ describe('Sicherung auf Android', () => {
     await new Promise((r) => setTimeout(r, 0))
 
     expect(importConfig).not.toHaveBeenCalled()
-    expect(w.find('.notice').exists()).toBe(false)
+    expect(w.find('.ss-feedback .text').exists()).toBe(false)
   })
 
   it('meldet einen fehlgeschlagenen Export als Export, nicht als Import', async () => {
@@ -144,6 +147,80 @@ describe('Sicherung auf Android', () => {
     await button(w, 'Exportieren').trigger('click')
     await vi.waitFor(() => expect(w.text()).toContain('Export fehlgeschlagen'))
     expect(w.text()).toContain('kein Platz')
+    // Ein Fehler bleibt stehen und wird sofort vorgelesen (E-62).
+    expect(w.get('.buttons .ss-feedback .error').attributes('role')).toBe('alert')
+  })
+})
+
+/**
+ * Rückmeldungen neben ihrem Auslöser (E-62).
+ *
+ * Vorher lief jede Meldung über eine Zeile ganz unten bei „Konfiguration" —
+ * auch „Passwort gespeichert" zum MQTT-Feld, das weit darüber steht.
+ */
+describe('Rückmeldungen', () => {
+  const MQTT_ON = {
+    ...CONFIG,
+    mqtt: { ...CONFIG.mqtt, enabled: true, discovery: false },
+  } as unknown as AppConfig
+
+  it('meldet das gespeicherte MQTT-Passwort beim Passwortfeld', async () => {
+    vi.spyOn(api, 'setMqttPassword').mockResolvedValue()
+    const w = setup(MQTT_ON)
+    await w.get('input[type="password"]').setValue('geheim')
+    await button(w, 'Speichern').trigger('click')
+
+    await vi.waitFor(() => {
+      const zeile = w.findAll('.row').find((r) => r.find('input[type="password"]').exists())
+      expect(zeile?.text()).toContain('Passwort gespeichert')
+    })
+    // Und nicht mehr unten bei der Konfiguration.
+    expect(w.get('.buttons').text()).not.toContain('Passwort gespeichert')
+  })
+
+  it('fragt vor dem Aufräumen der Datenbank im eigenen Dialog', async () => {
+    vi.spyOn(api, 'checkDatabase').mockResolvedValue({
+      missingFiles: ['a'],
+      orphanFiles: ['b', 'c'],
+      orphanThumbs: [],
+      reclaimableBytes: 2048,
+    } as never)
+    const repair = vi.spyOn(api, 'repairDatabase').mockResolvedValue(2048)
+
+    const w = setup()
+    await button(w, 'Prüfen').trigger('click')
+    await vi.waitFor(() => expect(w.text()).toContain('Aufräumen'))
+
+    const aufraeumen = button(w, 'Aufräumen')
+    // Destruktiv, also in der Gefahrenfarbe (E-58) — vorher nicht rot.
+    expect(aufraeumen.classes()).toContain('ss-btn--danger')
+    await aufraeumen.trigger('click')
+    await vi.waitFor(() => expect(confirmRequest.value).toBeTruthy())
+
+    expect(confirmRequest.value!.body).toContain('2 Datei(en)')
+    expect(repair).not.toHaveBeenCalled()
+    settle('confirm')
+    await vi.waitFor(() => expect(repair).toHaveBeenCalled())
+  })
+
+  it('räumt nichts auf, wenn die Rückfrage abgebrochen wird', async () => {
+    vi.spyOn(api, 'checkDatabase').mockResolvedValue({
+      missingFiles: ['a'],
+      orphanFiles: [],
+      orphanThumbs: [],
+      reclaimableBytes: 0,
+    } as never)
+    const repair = vi.spyOn(api, 'repairDatabase').mockResolvedValue(0)
+
+    const w = setup()
+    await button(w, 'Prüfen').trigger('click')
+    await vi.waitFor(() => expect(w.text()).toContain('Aufräumen'))
+    await button(w, 'Aufräumen').trigger('click')
+    await vi.waitFor(() => expect(confirmRequest.value).toBeTruthy())
+    settle(CANCEL)
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(repair).not.toHaveBeenCalled()
   })
 })
 

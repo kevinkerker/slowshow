@@ -31,8 +31,8 @@ defineProps<{
 .row {
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 14px 0;
+  gap: var(--ss-space-3);
+  padding: var(--ss-space-2) 0;
   border-bottom: 1px solid var(--ss-border-soft);
 }
 
@@ -46,14 +46,14 @@ defineProps<{
 }
 
 .label {
-  font-size: 15px;
+  font-size: var(--ss-fs-l);
   color: var(--ss-text-strong);
 }
 
 .hint {
-  margin-top: 3px;
-  font-size: 13px;
-  line-height: 1.4;
+  margin-top: 4px;
+  font-size: var(--ss-fs-m);
+  line-height: 1.45;
   color: var(--ss-text-dim);
 }
 
@@ -68,7 +68,7 @@ defineProps<{
 .row.stacked {
   flex-direction: column;
   align-items: stretch;
-  gap: 10px;
+  gap: var(--ss-space-1);
 }
 
 .row.stacked .control {

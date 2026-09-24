@@ -1,26 +1,49 @@
 <script setup lang="ts">
 /**
- * Einstellungen (Artboard „Einstellungen · Quellen").
+ * Einstellungen (Artboards S1–S5, Rahmen nach `Thema-Dunkel-Quellen`).
  *
- * Kopfzeile mit Wortmarke und Schließen-Knopf, links die vier Bereiche, rechts
+ * Kopfzeile mit Wortmarke und Schließen-Knopf, links die fünf Bereiche, rechts
  * der Inhalt. Alle Einstellungen sind direkt auf dem Tablet erreichbar (FA-40)
  * und werden sofort gespeichert (FA-42) — es gibt bewusst keinen
  * „Speichern"-Knopf, den man auf einem Bilderrahmen vergessen könnte.
+ *
+ * Folgt seit E-64 dem hellen oder dunklen Erscheinungsbild des Systems; die
+ * Farben kommen allein aus den Tokens.
  */
 import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import SsIconButton from '@/components/SsIconButton.vue'
 import SourcesPane from '@/components/panes/SourcesPane.vue'
 import ImagesPane from '@/components/panes/ImagesPane.vue'
 import ShowPane from '@/components/panes/ShowPane.vue'
 import SchedulePane from '@/components/panes/SchedulePane.vue'
 import SystemPane from '@/components/panes/SystemPane.vue'
+import type { ImageFilter } from '@/lib/types'
 
 type Pane = 'sources' | 'images' | 'show' | 'schedule' | 'system'
 
+const PANES: Pane[] = ['sources', 'images', 'show', 'schedule', 'system']
+
 const router = useRouter()
+const route = useRoute()
 const { t } = useI18n()
-const pane = ref<Pane>('sources')
+
+/**
+ * Bereich beim Öffnen, wahlweise aus der Adresse (`?pane=images`).
+ *
+ * Der Hinweis auf wartende Fotos in der Diashow öffnet so gleich den
+ * Bild-Browser in der Quarantäne (`&filter=quarantine`), statt wie vorher in
+ * den Quellen zu landen, wo die Fotos gar nicht zu sehen sind.
+ */
+function queryString(key: string): string | undefined {
+  const value = route?.query[key]
+  return typeof value === 'string' ? value : undefined
+}
+
+const requestedPane = queryString('pane') as Pane | undefined
+const pane = ref<Pane>(requestedPane && PANES.includes(requestedPane) ? requestedPane : 'sources')
+const initialImageFilter = queryString('filter') as ImageFilter | undefined
 
 /// Quelle, die beim Wechsel in den Quellenbereich gleich geoeffnet wird.
 ///
@@ -69,11 +92,11 @@ const title = computed(() => t(`nav.${pane.value}`))
         <span class="ss-wordmark">{{ t('app.name') }}</span>
         <span class="ss-label">{{ title }}</span>
       </div>
-      <button class="close" :aria-label="t('nav.close')" @click="router.push('/')">
-        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="var(--ss-icon-soft)" stroke-width="1.5" stroke-linecap="round">
+      <SsIconButton :label="t('nav.close')" @click="router.push('/')">
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
           <path d="M4 4 L16 16 M16 4 L4 16" />
         </svg>
-      </button>
+      </SsIconButton>
     </header>
 
     <div class="main">
@@ -106,7 +129,11 @@ const title = computed(() => t(`nav.${pane.value}`))
 
       <div class="content">
         <SourcesPane v-if="pane === 'sources'" :open-source-id="openSourceId" />
-        <ImagesPane v-else-if="pane === 'images'" @open-source="showSource" />
+        <ImagesPane
+          v-else-if="pane === 'images'"
+          :initial-filter="initialImageFilter"
+          @open-source="showSource"
+        />
         <ShowPane v-else-if="pane === 'show'" />
         <SchedulePane v-else-if="pane === 'schedule'" />
         <SystemPane v-else />
@@ -134,7 +161,7 @@ const title = computed(() => t(`nav.${pane.value}`))
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 24px 40px;
+  padding: var(--ss-space-2) var(--ss-space-4) var(--ss-space-2) var(--ss-space-5);
   border-bottom: 1px solid var(--ss-border-soft);
   flex-shrink: 0;
 }
@@ -142,17 +169,7 @@ const title = computed(() => t(`nav.${pane.value}`))
 .titles {
   display: flex;
   align-items: baseline;
-  gap: 14px;
-}
-
-.close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--ss-touch-target);
-  height: var(--ss-touch-target);
-  border: 1px solid var(--ss-border-strong);
-  border-radius: var(--ss-radius-pill);
+  gap: var(--ss-space-2);
 }
 
 .main {
@@ -164,9 +181,9 @@ const title = computed(() => t(`nav.${pane.value}`))
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--ss-space-1);
   width: var(--ss-nav-width);
-  padding: 28px 20px;
+  padding: var(--ss-space-4) var(--ss-space-2);
   border-right: 1px solid var(--ss-border-soft);
   flex-shrink: 0;
 }
@@ -175,8 +192,9 @@ const title = computed(() => t(`nav.${pane.value}`))
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 13px 16px;
-  border-radius: var(--ss-radius-nav);
+  height: var(--ss-touch-target);
+  padding: 0 var(--ss-space-2);
+  border-radius: var(--ss-radius-sm);
   color: var(--ss-text-muted);
   text-align: left;
   transition: background var(--ss-transition), color var(--ss-transition);
@@ -188,7 +206,7 @@ const title = computed(() => t(`nav.${pane.value}`))
 }
 
 .nav-label {
-  font-size: 15px;
+  font-size: var(--ss-fs-l);
 }
 
 .nav-item.active .nav-label {
@@ -198,25 +216,25 @@ const title = computed(() => t(`nav.${pane.value}`))
 .content {
   flex-grow: 1;
   min-width: 0;
-  padding: 32px 40px;
+  padding: var(--ss-space-4) var(--ss-space-5);
   overflow: hidden;
 }
 
 @media (max-width: 900px) {
   .head {
-    padding: 16px 20px;
+    padding: var(--ss-space-2);
   }
 
   .nav {
-    padding: 16px 10px;
+    padding: var(--ss-space-2) var(--ss-space-1);
   }
 
   .nav-label {
-    font-size: 13px;
+    font-size: var(--ss-fs-m);
   }
 
   .content {
-    padding: 20px;
+    padding: var(--ss-space-2);
   }
 }
 </style>

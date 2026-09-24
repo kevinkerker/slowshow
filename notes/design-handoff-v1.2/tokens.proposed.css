@@ -1,0 +1,155 @@
+/* Slowshow — Design-Tokens, Entwurf v1.2 (E-58 bis E-64)
+ *
+ * Ersetzt src/styles/tokens.css. Änderungen gegenüber v1.1.0 sind mit
+ * [neu] oder [geändert] markiert.
+ *
+ * Erscheinungsbild (E-64, hebt E-13 teilweise auf): Einstellungen und Dialoge
+ * folgen prefers-color-scheme. Diashow, Nachtmodus, Start- und Leerzustand
+ * bleiben immer dunkel — dort ist das Foto die einzige helle Fläche, und nachts
+ * bleibt der Schirm dunkel. Dafür trägt der Wurzelknoten der Diashow die Klasse
+ * `.ss-always-dark`, die den dunklen Satz erzwingt.
+ */
+
+:root,
+.ss-always-dark {
+  color-scheme: dark;
+
+  /* ── Flächen ─────────────────────────────────────────────────────────── */
+  --ss-bg: #0a0a0a;
+  --ss-bg-night: #000000;
+  --ss-surface: #100f0e;
+  --ss-surface-accent: #17150f;
+  --ss-input-bg: #0a0a0a;                 /* [neu] */
+
+  /* ── Linien ──────────────────────────────────────────────────────────── */
+  --ss-border: #1e1c19;
+  --ss-border-soft: #1c1b19;
+  --ss-border-strong: #26241f;
+  --ss-border-dashed: #2c2a25;
+
+  /* ── Text ────────────────────────────────────────────────────────────── */
+  --ss-text: #f2efe9;
+  --ss-text-strong: #eeebe5;
+  --ss-text-body: #e8e5e0;
+  --ss-text-accent: #e9dfc9;
+  --ss-text-muted: #8d8a83;
+  --ss-text-dim: #858177;                 /* [geändert] vorher #767268 · 4,1 → 5,1 : 1 (E-63) */
+  --ss-text-faint: #7d7970;               /* [geändert] vorher #5c5952 · 2,8 → 4,6 : 1 (E-63) */
+  --ss-icon-muted: #6f6c65;
+  --ss-icon-soft: #a6a29a;
+
+  /* ── Akzent (Messing) ────────────────────────────────────────────────── */
+  --ss-accent: #c2a878;                   /* Messing als Text und Symbol */
+  --ss-accent-fill: #c2a878;              /* [neu] Fläche des Primärknopfs */
+  --ss-accent-hover: #d8c29a;             /* gedrückt */
+  --ss-on-accent: #0a0a0a;                /* [neu] Text auf Messingfläche */
+  --ss-selected-text: #c2a878;            /* [neu] gewähltes Segment / Chip */
+
+  /* ── Schalter ────────────────────────────────────────────────────────── */
+  --ss-toggle-on: #c2a878;                /* [neu] Schalter an, Reglerfüllung */
+  --ss-toggle-knob-on: #0a0a0a;           /* [neu] */
+  --ss-toggle-off: #26241f;
+  --ss-toggle-knob-off: #55524b;
+
+  /* ── Nachtmodus (bleibt bewusst unter 4,5 : 1) ───────────────────────── */
+  --ss-night-clock: #2e2c29;
+  --ss-night-label: #1f1e1c;
+
+  /* ── Rückmeldung ─────────────────────────────────────────────────────── */
+  --ss-error: #c46686;
+  --ss-ok: var(--ss-accent);
+
+  /* ── Überlagerungen ──────────────────────────────────────────────────── */
+  --ss-overlay-scrim: rgba(10, 10, 10, 0.82);  /* [neu] Pillen in der Diashow, war hart kodiert */
+  --ss-dialog-scrim: rgba(0, 0, 0, 0.72);      /* [neu] war dreimal hart kodiert */
+  --ss-shadow-dialog: none;                    /* [neu] */
+  --ss-clock-scrim: linear-gradient(180deg, rgba(5, 5, 6, 0) 0%, rgba(5, 5, 6, 0.55) 100%); /* [neu] */
+  --ss-tile-scrim: linear-gradient(180deg, rgba(5, 5, 6, 0) 0%, rgba(5, 5, 6, 0.8) 100%);   /* [neu] */
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --ss-bg: #f4f1eb;
+    --ss-surface: #fbf9f5;
+    --ss-surface-accent: #efe6d3;
+    --ss-input-bg: #fdfcfa;
+    --ss-border: #e3ded4;
+    --ss-border-soft: #e6e1d8;
+    --ss-border-strong: #d3cdc1;
+    --ss-border-dashed: #c4bdae;
+    --ss-text: #1a1814;
+    --ss-text-strong: #1f1d19;
+    --ss-text-body: #2a2722;
+    --ss-text-accent: #4f412a;
+    --ss-text-muted: #5f5b53;
+    --ss-text-dim: #6e6a62;
+    --ss-text-faint: #716d64;
+    --ss-icon-muted: #858074;
+    --ss-icon-soft: #5f5b53;
+    --ss-accent: #82673a;                 /* Messing auf hell: 4,7 : 1 */
+    --ss-accent-fill: #c2a878;            /* Fläche bleibt gleich */
+    --ss-accent-hover: #b39766;
+    --ss-on-accent: #1a1814;
+    --ss-selected-text: #4f412a;
+    --ss-toggle-on: #82673a;
+    --ss-toggle-knob-on: #fbf9f5;
+    --ss-toggle-off: #d3cdc1;
+    --ss-toggle-knob-off: #8f8a80;
+    --ss-error: #a8425f;
+    --ss-dialog-scrim: rgba(26, 24, 20, 0.36);
+    --ss-shadow-dialog: 0 24px 48px rgba(26, 24, 20, 0.14), 0 4px 12px rgba(26, 24, 20, 0.06);
+  }
+}
+
+:root {
+  /* ── Typografie ──────────────────────────────────────────────────────── */
+  --ss-font-ui: 'Instrument Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --ss-font-display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+
+  /* [neu] Schriftgrößen (E-60 · F6 C) — ersetzt die elf harten Werte */
+  --ss-fs-s: 12px;        /* Versal-Überschrift, Abzeichen (500, 0.2em) */
+  --ss-fs-m: 14px;        /* Hinweis, Knopf, Segment, Chip, Toast, Rückmeldung */
+  --ss-fs-l: 16px;        /* Zeile, Eingabe, Kartentitel, Navigation */
+  --ss-fs-xl: 22px;       /* Dialogtitel, Kennzahl (Display-Schrift) */
+  --ss-fs-brand: 26px;    /* Wortmarke Kopfzeile */
+  --ss-fs-brand-lg: 42px; /* Wortmarke Leerzustand */
+  --ss-fs-caption: 24px;  /* Bildunterschrift, kursiv */
+  --ss-fs-clock: 92px;
+  --ss-fs-night: 120px;
+
+  /* [neu] Abstände, 8er-Raster (E-60) */
+  --ss-space-1: 8px;
+  --ss-space-2: 16px;     /* Zeilenabstand oben/unten (vorher 14) */
+  --ss-space-3: 24px;     /* Karteninnenabstand (vorher 22/24) */
+  --ss-space-4: 32px;     /* Abschnittsabstand (vorher 28), Bereich oben */
+  --ss-space-5: 48px;     /* Bereich seitlich (vorher 40) */
+  --ss-space-6: 56px;
+
+  /* ── Form (E-61 · F7 B) ──────────────────────────────────────────────── */
+  --ss-radius-sm: 8px;    /* [neu] Eingabe, Navigation, Bildkachel — ersetzt --ss-radius-nav */
+  --ss-radius-md: 12px;   /* [neu] Karte, Auswahlkarte, Symbolkachel — ersetzt --ss-radius-card, 10 entfällt */
+  --ss-radius-lg: 16px;   /* [neu] alle Dialoge, auch der Quellendialog (vorher 12) */
+  --ss-radius-pill: 999px;
+
+  /* ── Bedienung (E-58, E-62, E-63) ────────────────────────────────────── */
+  --ss-touch-target: 48px;          /* [geändert] vorher 44 — Android 48 dp */
+  --ss-button-height: 48px;         /* [neu] */
+  --ss-opacity-disabled: 0.4;       /* [neu] */
+  --ss-feedback-duration: 6s;       /* [neu] Erfolgsmeldung, überall gleich */
+
+  /* ── Bewegung ────────────────────────────────────────────────────────── */
+  --ss-transition: 0.2s ease;
+
+  /* ── Maße ────────────────────────────────────────────────────────────── */
+  --ss-nav-width: 250px;
+  --ss-overlay-inset: 56px;
+}
+
+@media (max-width: 900px) {
+  :root {
+    --ss-nav-width: 180px;
+    --ss-overlay-inset: 32px;
+    --ss-fs-clock: 64px;
+  }
+}

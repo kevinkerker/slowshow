@@ -16,7 +16,7 @@
     "emptyHint": "Add a source to start the slideshow.",
     "addSource": "Add source",
     "paused": "Paused",
-    "waiting": "{n} photos waiting for approval",
+    "waiting": "{n} photo waiting for approval | {n} photos waiting for approval",
     "loading": "Preparing photos …",
     "excludeImage": "Stop showing this photo",
     "excluded": "Photo removed from the slideshow",
@@ -24,7 +24,8 @@
     "holdHint": "Press and hold to open"
   },
   "night": {
-    "restUntil": "Resting until {time}"
+    "restUntil": "Resting until {time}",
+    "resting": "Resting"
   },
   "orientation": {
     "landscape": "Landscape",
@@ -91,7 +92,8 @@
     "scanning": "Scanning {path}",
     "edit": "Edit",
     "remove": "Remove",
-    "removeConfirm": "Remove source \"{name}\"? Cached photos will be deleted; nothing changes at the source.",
+    "removeTitle": "Remove source “{name}”?",
+    "removeBody": "Cached photos will be deleted; nothing changes at the source.",
     "syncResult": "{added} new, {updated} updated, {removed} removed",
     "syncNothing": "No changes",
     "syncFailed": "Sync failed: {error}",
@@ -124,11 +126,14 @@
     "quarantineAllHint": "Even known senders then wait for a tap on the frame.",
     "allowedSenders": "Approved senders",
     "allowedSendersHint": "Anyone listed here skips the quarantine.",
-    "allowedSendersEmpty": "Nobody approved yet. The list grows when you pick “trust sender” while releasing a photo.",
+    "allowedSendersEmpty": "Nobody approved yet. The list grows when you pick “All from …” while releasing a photo.",
     "senderPhotos": "{n} photo | {n} photos",
     "removeSender": "Remove sender",
-    "removeSenderAsk": "Remove {sender}?\n\nFuture mail will wait for approval again.\n\nShould the {n} existing photos go back to the quarantine as well?\n\nOK = yes, back to quarantine\nCancel = no, keep them visible",
-    "removeSenderAskEmpty": "Remove {sender}?\n\nFuture mail will wait for approval again.",
+    "removeSenderTitle": "Remove {sender}?",
+    "removeSenderBody": "Future mail will wait for approval again. {n} photo from this address is already here. | Future mail will wait for approval again. {n} photos from this address are already here.",
+    "removeSenderKeep": "Remove · keep photos visible",
+    "removeSenderRequarantine": "Remove · move {n} photo back to quarantine | Remove · move {n} photos back to quarantine",
+    "removeSenderBodyEmpty": "Future mail will wait for approval again.",
     "senderRemoved": "Sender removed",
     "senderRemovedWith": "Sender removed · {n} photos wait for approval again",
     "maxAttachment": "Largest attachment (MB)",
@@ -189,7 +194,8 @@
     "fetchLogLine": "{checked} fetched · {added} new · {known} known",
     "resync": "Resync mailbox",
     "resyncHint": "Scans the whole folder and fetches what is missing. Existing photos are left untouched.",
-    "resyncAsk": "Fully resync the mailbox?\\n\\nThe frame scans every message in the folder — with a full mailbox this takes several minutes. The slideshow keeps running and you can cancel at any time.",
+    "resyncTitle": "Fully resync the mailbox?",
+    "resyncBody": "The frame scans every message in the folder — with a full mailbox this takes several minutes. The slideshow keeps running and you can cancel at any time.",
     "resyncRunning": "{done} of {total} messages checked · {added} new",
     "resyncCancel": "Cancel",
     "resyncDone": "Resync finished · {n} new photos"
@@ -257,7 +263,8 @@
     "restartCycleDone": "Cycle starts over.",
     "resetHistory": "Reset display history",
     "resetHistoryHint": "Sets counters and timestamps of the current set to zero.",
-    "resetHistoryAsk": "Reset display history of {n} photos?\\n\\nCounters and timestamps are lost — the slideshow will treat every photo as new. The photos themselves stay.",
+    "resetHistoryTitle": "Reset display history of {n} photos?",
+    "resetHistoryBody": "Counters and timestamps are lost — the slideshow will treat every photo as new. The photos themselves stay.",
     "resetHistoryDone": "{n} photos reset."
   },
   "schedule": {
@@ -346,7 +353,8 @@
     "databaseClean": "All good.",
     "databaseFound": "{missing} entries without file · {orphan} files without entry · {bytes} reclaimable",
     "databaseRepair": "Clean up",
-    "databaseRepairAsk": "Clean up?\\n\\n{orphan} file(s) without an entry will be deleted, {missing} entr(ies) without a file removed from the index. Photos that belong to the slideshow are left untouched.",
+    "databaseRepairTitle": "Clean up?",
+    "databaseRepairBody": "{orphan} file(s) without an entry will be deleted, {missing} entr(ies) without a file removed from the index. Photos that belong to the slideshow are left untouched.",
     "databaseRepaired": "{bytes} freed.",
     "diagnostics": "Diagnostic report",
     "diagnosticsHint": "For bug reports. Without mail addresses, server names and file names; senders appear as “Sender A”.",

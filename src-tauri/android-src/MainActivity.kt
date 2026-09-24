@@ -10,10 +10,13 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.view.WindowManager
+import android.webkit.WebView
 import androidx.annotation.Keep
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
 
 /**
  * Nativer Teil von Slowshow.
@@ -32,6 +35,7 @@ import androidx.core.view.WindowInsetsControllerCompat
  *  - R-08   Akkuzustand im Dauerbetrieb auslesen (E-23)
  *  - NF-01  Vordergrunddienst gegen den Abschuss bei Speicherdruck (E-24)
  *  - E-26   Ausrichtung des Rahmens aus der App heraus setzen
+ *  - E-64   Keine algorithmische Abdunkelung der WebView
  *
  * Bewusst **nicht** übernommen aus vergleichbaren Projekten: `FLAG_SECURE`.
  * Für eine Tresor-App ist das richtig, für einen Bilderrahmen wäre es
@@ -80,6 +84,24 @@ class MainActivity : TauriActivity() {
 
     /** Registriert diese Activity im Rust-Backend (siehe `src/android_bridge.rs`). */
     private external fun nativeRegisterActivity()
+
+    /**
+     * E-64: Die Oberfläche färbt sich selbst um, Android soll es nicht tun.
+     *
+     * Die Einstellungen folgen über `prefers-color-scheme` dem hellen oder
+     * dunklen Systembild; das Theme ist `DayNight`, damit die WebView die
+     * Vorgabe überhaupt weitergibt. Die algorithmische Abdunkelung würde
+     * obendrein die hellen Flächen selbst invertieren — und dabei auch die
+     * Diashow anfassen, die bewusst immer dunkel ist. Deshalb ausdrücklich aus,
+     * statt sich auf die Voreinstellung der jeweiligen WebView-Version zu
+     * verlassen.
+     */
+    override fun onWebViewCreate(webView: WebView) {
+        super.onWebViewCreate(webView)
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(webView.settings, false)
+        }
+    }
 
     /**
      * FA-01: Vollbild ohne Systemleisten.

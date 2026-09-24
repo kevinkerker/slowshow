@@ -27,6 +27,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import SsButton from '../SsButton.vue'
 import * as api from '@/lib/api'
 import { imageUrl, thumbUrl } from '@/lib/api'
 import { formatBytes, formatTakenAt, stripExtension } from '@/lib/format'
@@ -50,7 +51,18 @@ const FILTERS: ImageFilter[] = [
   'neverShown',
 ]
 
-const filter = ref<ImageFilter>('all')
+const props = defineProps<{
+  /**
+   * Filter beim Öffnen. Der Hinweis „Fotos warten auf Freigabe“ in der
+   * Diashow führt direkt in die Quarantäne — vorher landete er bei den
+   * Quellen, und die wartenden Fotos musste man selbst suchen.
+   */
+  initialFilter?: ImageFilter
+}>()
+
+const filter = ref<ImageFilter>(
+  props.initialFilter && FILTERS.includes(props.initialFilter) ? props.initialFilter : 'all',
+)
 
 const emit = defineEmits<{ openSource: [id: string] }>()
 
@@ -182,6 +194,7 @@ let observer: IntersectionObserver | null = null
 
 onMounted(async () => {
   await loadPage(true)
+  if (filter.value === 'quarantine') void loadSenderCount()
 
   // Nachladen, sobald der Fußpunkt in Sicht kommt. Ein Scroll-Listener täte es
   // auch, liefe aber bei jedem Pixel — auf einem Tablet unnötig teuer (NF-06).
@@ -222,14 +235,15 @@ watch(filter, () => {
       {{ t('images.quarantineHint') }}
     </p>
 
-    <button
+    <SsButton
       v-if="filter === 'quarantine' && mailSource"
+      variant="link"
       class="senders-link"
       @click="emit('openSource', mailSource.id)"
     >
       {{ t('images.allowedSenders', { n: senderCount }, senderCount) }}
       <span aria-hidden="true">›</span>
-    </button>
+    </SsButton>
 
     <p v-if="!loading && total === 0" class="muted">{{ t('images.empty') }}</p>
 
@@ -243,12 +257,14 @@ watch(filter, () => {
         @click="toggle(entry)"
       >
         <img :src="thumbUrl(entry.id)" :alt="entry.fileName" loading="lazy" decoding="async" />
-        <span class="label">
+        <!-- Beschriftung und Abzeichen liegen auf dem Foto und bleiben deshalb
+             auch im hellen Erscheinungsbild dunkel (E-64). -->
+        <span class="label ss-always-dark">
           <span v-if="senderOf(entry)" class="sender">{{ senderOf(entry) }}</span>
           <span class="taken">{{ caption(entry) }}</span>
         </span>
-        <span v-if="entry.excluded" class="badge">{{ t('images.hidden') }}</span>
-        <span v-else-if="entry.mail?.quarantined" class="badge waiting">
+        <span v-if="entry.excluded" class="badge ss-always-dark">{{ t('images.hidden') }}</span>
+        <span v-else-if="entry.mail?.quarantined" class="badge waiting ss-always-dark">
           {{ t('images.waiting') }}
         </span>
       </button>
@@ -273,14 +289,14 @@ watch(filter, () => {
           <dd>{{ releasing.mail?.subject || t('images.releaseNoSubject') }}</dd>
         </dl>
         <div class="actions">
-          <button class="primary" @click="confirmRelease(false)">
+          <SsButton variant="primary" @click="confirmRelease(false)">
             {{ t('images.releaseOne') }}
-          </button>
-          <button class="secondary" @click="confirmRelease(true)">
+          </SsButton>
+          <SsButton variant="secondary" class="wrap" @click="confirmRelease(true)">
             {{ t('images.releaseSender', { sender: releasing.mail?.sender }) }}
-          </button>
+          </SsButton>
           <p class="trust-hint">{{ t('images.releaseSenderHint') }}</p>
-          <button class="ghost" @click="releasing = null">{{ t('common.cancel') }}</button>
+          <SsButton variant="ghost" @click="releasing = null">{{ t('common.cancel') }}</SsButton>
         </div>
       </div>
     </div>
@@ -304,12 +320,12 @@ watch(filter, () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
+  gap: var(--ss-space-2);
+  margin-bottom: var(--ss-space-3);
 }
 
 .count {
-  font-size: 13px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
   font-variant-numeric: tabular-nums;
 }
@@ -317,7 +333,7 @@ watch(filter, () => {
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
-  gap: 10px;
+  gap: var(--ss-space-1);
 }
 
 .cell {
@@ -325,7 +341,7 @@ watch(filter, () => {
   display: block;
   padding: 0;
   aspect-ratio: 1;
-  border-radius: var(--ss-radius-nav);
+  border-radius: var(--ss-radius-sm);
   overflow: hidden;
   background: var(--ss-surface);
   /* Überspringt Layout und Malen für alles, was gerade nicht sichtbar ist —
@@ -371,21 +387,22 @@ watch(filter, () => {
   z-index: 40;
   display: grid;
   place-items: center;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.72);
+  padding: var(--ss-space-2);
+  background: var(--ss-dialog-scrim);
 }
 
 .release {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--ss-space-2);
   width: min(520px, 100%);
   max-height: 100%;
   overflow-y: auto;
-  padding: 20px;
-  border: 1px solid var(--ss-border-soft);
-  border-radius: 16px;
+  padding: var(--ss-space-3);
+  border: 1px solid var(--ss-border);
+  border-radius: var(--ss-radius-lg);
   background: var(--ss-surface);
+  box-shadow: var(--ss-shadow-dialog);
 }
 
 /* Begrenzt, damit ein Hochformat den Dialog nicht ueber den Schirm schiebt --
@@ -394,8 +411,8 @@ watch(filter, () => {
   width: 100%;
   max-height: 38vh;
   object-fit: contain;
-  border-radius: 10px;
-  background: #000;
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-bg-night);
 }
 
 .release .meta {
@@ -403,7 +420,7 @@ watch(filter, () => {
   grid-template-columns: auto 1fr;
   gap: 4px 12px;
   margin: 0;
-  font-size: 14px;
+  font-size: var(--ss-fs-m);
 }
 
 .release .meta dt {
@@ -418,40 +435,23 @@ watch(filter, () => {
 .release .actions {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  align-items: stretch;
+  gap: var(--ss-space-1);
 }
 
-.release .actions button {
-  padding: 12px 16px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  font: inherit;
-  font-size: 15px;
-  cursor: pointer;
-}
-
-.release .actions .primary {
-  background: var(--ss-accent);
-  color: #14100a;
-}
-
-.release .actions .secondary {
-  background: transparent;
-  border-color: var(--ss-border-soft);
-  color: var(--ss-text);
-  /* Lange Adressen duerfen umbrechen -- die Beschriftung traegt den Absender,
-     und abgeschnitten waere sie wertlos. */
+/* Lange Adressen duerfen umbrechen -- die Beschriftung traegt den Absender,
+   und abgeschnitten waere sie wertlos. */
+.release .actions .wrap {
   white-space: normal;
-}
-
-.release .actions .ghost {
-  background: transparent;
-  color: var(--ss-text-dim);
+  height: auto;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  overflow-wrap: anywhere;
 }
 
 .release .trust-hint {
   margin: -4px 0 4px;
-  font-size: 12px;
+  font-size: var(--ss-fs-m);
   line-height: 1.45;
   color: var(--ss-text-dim);
 }
@@ -462,32 +462,22 @@ watch(filter, () => {
   right: 0;
   bottom: 0;
   padding: 14px 8px 6px;
-  font-size: 11px;
+  font-size: var(--ss-fs-s);
   color: var(--ss-text-body);
   text-align: left;
-  background: linear-gradient(180deg, rgba(5, 5, 6, 0) 0%, rgba(5, 5, 6, 0.8) 100%);
+  background: var(--ss-tile-scrim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .senders-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 14px;
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 13px;
-  color: var(--ss-accent);
-  cursor: pointer;
+  margin: -8px 0 var(--ss-space-1);
 }
 
 .hint {
-  margin: 0 0 14px;
-  font-size: 13px;
+  margin: 0 0 var(--ss-space-1);
+  font-size: var(--ss-fs-m);
   line-height: 1.5;
   color: var(--ss-text-dim);
 }
@@ -498,9 +488,9 @@ watch(filter, () => {
   right: 6px;
   padding: 2px 8px;
   border-radius: var(--ss-radius-pill);
-  background: rgba(10, 10, 10, 0.82);
+  background: var(--ss-overlay-scrim);
   color: var(--ss-accent);
-  font-size: 10px;
+  font-size: var(--ss-fs-s);
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
@@ -515,14 +505,14 @@ watch(filter, () => {
 .sentinel {
   display: flex;
   justify-content: center;
-  padding: 24px 0;
-  font-size: 13px;
+  padding: var(--ss-space-3) 0;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
 }
 
 .muted {
   padding: 10px 0;
-  font-size: 14px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
 }
 </style>

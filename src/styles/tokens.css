@@ -1,22 +1,35 @@
-/* Slowshow — Design-Tokens (E-13, Artboards in slowshow-app-design.html)
+/* Slowshow — Design-Tokens (E-13, fortgeschrieben durch E-58 bis E-64)
+ *
+ * Canvas: notes/design-handoff-v1.2/canvas/ (Übersicht „Slowshow App-Design").
  *
  * Galerie-minimal: Tiefschwarz als Grund, Off-White als Text, Messing als
  * einziger Akzent. Das Tiefschwarz ist kein Zufall — es ist OLED-freundlich
  * und stützt damit NF-07 (Einbrennschutz) und R-08 (Dauerbetrieb).
  *
- * Die App hat bewusst nur ein Erscheinungsbild. Ein heller Modus wäre für
- * einen Bilderrahmen im Dauerbetrieb sinnwidrig: Der Rahmen soll im dunklen
- * Wohnzimmer nicht leuchten, und die Fotos sollen den einzigen hellen Bereich
- * bilden.
+ * Zwei Erscheinungsbilder seit E-64 (hebt E-13 für die Einstellungen auf):
+ * Einstellungen und Dialoge folgen `prefers-color-scheme`. Diashow, Nachtmodus,
+ * Start- und Leerzustand bleiben immer dunkel — dort ist das Foto die einzige
+ * helle Fläche, und der Rahmen soll im dunklen Wohnzimmer nicht leuchten.
+ * Dafür trägt die Wurzel dieser Ansichten die Klasse `.ss-always-dark`, die den
+ * dunklen Satz erzwingt. Komponenten brauchen keine eigene Logik, solange sie
+ * ausschließlich diese Tokens verwenden.
+ *
+ * Messing als Text und Symbol (`--ss-accent`) wird im hellen Bild dunkler,
+ * damit es lesbar bleibt; als Fläche bleibt es gleich (`--ss-accent-fill`).
+ * Deshalb nie `--ss-accent` als Knopffläche verwenden.
  */
 
-:root {
+:root,
+.ss-always-dark {
+  color-scheme: dark;
+
   /* ── Flächen ─────────────────────────────────────────────────────────── */
   --ss-bg: #0a0a0a;
   --ss-bg-night: #000000;
   --ss-surface: #100f0e;
   /* Messinggetönte Fläche für aktive Navigation und Quellen-Symbole */
   --ss-surface-accent: #17150f;
+  --ss-input-bg: #0a0a0a;
 
   /* ── Linien ──────────────────────────────────────────────────────────── */
   --ss-border: #1e1c19;
@@ -30,20 +43,26 @@
   --ss-text-body: #e8e5e0;
   --ss-text-accent: #e9dfc9;
   --ss-text-muted: #8d8a83;
-  --ss-text-dim: #767268;
-  --ss-text-faint: #5c5952;
+  /* E-63: beide Stufen lagen unter 4,5 : 1 (vorher #767268 und #5c5952). */
+  --ss-text-dim: #858177;
+  --ss-text-faint: #7d7970;
   --ss-icon-muted: #6f6c65;
   --ss-icon-soft: #a6a29a;
 
   /* ── Akzent (Messing) ────────────────────────────────────────────────── */
-  --ss-accent: #c2a878;
-  --ss-accent-hover: #d8c29a;
+  --ss-accent: #c2a878;          /* als Text und Symbol */
+  --ss-accent-fill: #c2a878;     /* als Fläche des Primärknopfs */
+  --ss-accent-hover: #d8c29a;    /* gedrückt */
+  --ss-on-accent: #0a0a0a;       /* Text auf Messingfläche */
+  --ss-selected-text: #c2a878;   /* gewähltes Segment, gewählter Chip */
 
   /* ── Schalter ────────────────────────────────────────────────────────── */
+  --ss-toggle-on: #c2a878;       /* Schalter an, Reglerfüllung */
+  --ss-toggle-knob-on: #0a0a0a;
   --ss-toggle-off: #26241f;
   --ss-toggle-knob-off: #55524b;
 
-  /* ── Nachtmodus (FA-54) ──────────────────────────────────────────────── */
+  /* ── Nachtmodus (FA-54, bleibt bewusst unter 4,5 : 1) ────────────────── */
   --ss-night-clock: #2e2c29;
   --ss-night-label: #1f1e1c;
 
@@ -51,6 +70,52 @@
   --ss-error: #c46686;
   --ss-ok: var(--ss-accent);
 
+  /* ── Überlagerungen ──────────────────────────────────────────────────── */
+  --ss-overlay-scrim: rgba(10, 10, 10, 0.82);  /* Pillen und Abzeichen */
+  --ss-dialog-scrim: rgba(0, 0, 0, 0.72);      /* Hintergrund hinter Dialogen */
+  --ss-shadow-dialog: none;
+  --ss-clock-scrim: linear-gradient(180deg, rgba(5, 5, 6, 0) 0%, rgba(5, 5, 6, 0.55) 100%);
+  --ss-tile-scrim: linear-gradient(180deg, rgba(5, 5, 6, 0) 0%, rgba(5, 5, 6, 0.8) 100%);
+}
+
+/* E-64: helles Erscheinungsbild für Einstellungen und Dialoge. Gilt nur an
+ * der Wurzel — `.ss-always-dark` setzt darunter den dunklen Satz neu. */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --ss-bg: #f4f1eb;
+    --ss-surface: #fbf9f5;
+    --ss-surface-accent: #efe6d3;
+    --ss-input-bg: #fdfcfa;
+    --ss-border: #e3ded4;
+    --ss-border-soft: #e6e1d8;
+    --ss-border-strong: #d3cdc1;
+    --ss-border-dashed: #c4bdae;
+    --ss-text: #1a1814;
+    --ss-text-strong: #1f1d19;
+    --ss-text-body: #2a2722;
+    --ss-text-accent: #4f412a;
+    --ss-text-muted: #5f5b53;
+    --ss-text-dim: #6e6a62;
+    --ss-text-faint: #716d64;
+    --ss-icon-muted: #858074;
+    --ss-icon-soft: #5f5b53;
+    --ss-accent: #82673a;          /* Messing auf hell: 4,7 : 1 */
+    --ss-accent-fill: #c2a878;     /* Fläche bleibt gleich */
+    --ss-accent-hover: #b39766;
+    --ss-on-accent: #1a1814;
+    --ss-selected-text: #4f412a;
+    --ss-toggle-on: #82673a;
+    --ss-toggle-knob-on: #fbf9f5;
+    --ss-toggle-off: #d3cdc1;
+    --ss-toggle-knob-off: #8f8a80;
+    --ss-error: #a8425f;
+    --ss-dialog-scrim: rgba(26, 24, 20, 0.36);
+    --ss-shadow-dialog: 0 24px 48px rgba(26, 24, 20, 0.14), 0 4px 12px rgba(26, 24, 20, 0.06);
+  }
+}
+
+:root {
   /* ── Typografie ──────────────────────────────────────────────────────── */
   /* Die Schriften werden lokal gebündelt, nie zur Laufzeit von Google Fonts
    * geladen: NF-04 verbietet Drittanbieter, und FA-26 verlangt, dass die App
@@ -60,10 +125,40 @@
   --ss-font-ui: 'Instrument Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --ss-font-display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
 
-  /* ── Form ────────────────────────────────────────────────────────────── */
-  --ss-radius-card: 12px;
-  --ss-radius-nav: 8px;
+  /* Schriftgrößen (E-60): vier Stufen für die Bedienung, dazu die
+   * Anzeigegrößen. Ersetzt die elf harten Werte aus v1.1.0. */
+  --ss-fs-s: 12px;        /* Versal-Überschrift, Abzeichen */
+  --ss-fs-m: 14px;        /* Hinweis, Knopf, Segment, Chip, Toast, Rückmeldung */
+  --ss-fs-l: 16px;        /* Zeile, Eingabe, Kartentitel, Navigation */
+  --ss-fs-xl: 22px;       /* Dialogtitel, Kennzahl (Display-Schrift) */
+  --ss-fs-brand: 26px;    /* Wortmarke Kopfzeile */
+  --ss-fs-brand-lg: 42px; /* Wortmarke Leerzustand */
+  --ss-fs-caption: 24px;  /* Bildunterschrift, kursiv */
+  --ss-fs-date: 15px;     /* Datum unter der Uhr, wie im Entwurf und am Gerät bestätigt */
+  --ss-fs-clock: 92px;
+  --ss-fs-night: 120px;
+
+  /* Abstände im 8er-Raster (E-60). */
+  --ss-space-1: 8px;
+  --ss-space-2: 16px;     /* Zeile oben/unten */
+  --ss-space-3: 24px;     /* Karte seitlich */
+  --ss-space-4: 32px;     /* Abschnitt, Bereich oben */
+  --ss-space-5: 48px;     /* Bereich seitlich */
+  --ss-space-6: 56px;
+
+  /* ── Form (E-61) ─────────────────────────────────────────────────────── */
+  --ss-radius-sm: 8px;    /* Eingabe, Navigation, Bildkachel */
+  --ss-radius-md: 12px;   /* Karte, Auswahlkarte, Symbolkachel */
+  --ss-radius-lg: 16px;   /* alle Dialoge */
   --ss-radius-pill: 999px;
+
+  /* ── Bedienung (E-58, E-62, E-63) ────────────────────────────────────── */
+  /* Die Bedienelemente sind für Fingerbedienung auf einem Tablet ausgelegt
+   * (FA-40). 48 px statt vorher 44 folgen der Android-Richtlinie (48 dp). */
+  --ss-touch-target: 48px;
+  --ss-button-height: 48px;
+  --ss-opacity-disabled: 0.4;
+  --ss-feedback-duration: 6s;  /* Erfolgsmeldung, überall gleich (E-62) */
 
   /* ── Bewegung ────────────────────────────────────────────────────────── */
   --ss-transition: 0.2s ease;
@@ -73,15 +168,10 @@
   --ss-overlay-inset: 56px;
 }
 
-/* Die Bedienelemente sind für Fingerbedienung auf einem Tablet ausgelegt:
- * 44 px ist die kleinste Fläche, die sich zuverlässig treffen lässt (FA-40). */
-:root {
-  --ss-touch-target: 44px;
-}
-
 @media (max-width: 900px) {
   :root {
     --ss-nav-width: 180px;
     --ss-overlay-inset: 32px;
+    --ss-fs-clock: 64px;
   }
 }

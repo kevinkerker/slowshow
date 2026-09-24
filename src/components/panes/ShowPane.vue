@@ -6,7 +6,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SettingRow from '../SettingRow.vue'
+import SsButton from '../SsButton.vue'
+import SsFeedback from '../SsFeedback.vue'
 import ToggleSwitch from '../ToggleSwitch.vue'
+import { confirmAction } from '@/composables/useConfirm'
+import { useFeedback } from '@/composables/useFeedback'
 import { useConfigStore } from '@/stores/config'
 import * as api from '@/lib/api'
 import type { FilterFacets, PlaybackStats, TimeFilter } from '@/lib/types'
@@ -24,7 +28,11 @@ const cfg = computed(() => store.config)
 // sucht hier und nicht unter „System".
 const stats = ref<PlaybackStats | null>(null)
 const statsBusy = ref(false)
-const notice = ref<string | null>(null)
+
+// Je Knopf eine Rückmeldung, direkt daneben (E-62). Vorher stand beides als
+// Zeile unter dem Abschnitt, in Messing statt nach der gemeinsamen Regel.
+const restartFeedback = useFeedback()
+const resetFeedback = useFeedback()
 
 async function loadStats() {
   try {
@@ -50,9 +58,8 @@ function zuletzt(unix: number | null): string {
   return formatRelativeTime(unix, new Date(), t)
 }
 
-function melde(text: string) {
-  notice.value = text
-  setTimeout(() => (notice.value = null), 6000)
+function message(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
 }
 
 async function onRestartCycle() {
@@ -60,7 +67,9 @@ async function onRestartCycle() {
   try {
     await api.restartCycle()
     await loadStats()
-    melde(t('show.restartCycleDone'))
+    restartFeedback.ok(t('show.restartCycleDone'))
+  } catch (e) {
+    restartFeedback.error(message(e))
   } finally {
     statsBusy.value = false
   }
@@ -70,13 +79,20 @@ async function onResetHistory() {
   // Die Zahl steht schon in der Statistik — die Rueckfrage nennt sie, damit
   // niemand raten muss, wie viel er gerade verwirft.
   const betroffen = stats.value?.eligible ?? 0
-  if (!confirm(t('show.resetHistoryAsk', { n: betroffen }))) return
+  const go = await confirmAction(
+    t('show.resetHistoryTitle', { n: betroffen }),
+    t('show.resetHistoryBody'),
+    t('show.resetHistory'),
+  )
+  if (!go) return
 
   statsBusy.value = true
   try {
     const n = await api.resetHistory()
     await loadStats()
-    melde(t('show.resetHistoryDone', { n }))
+    resetFeedback.ok(t('show.resetHistoryDone', { n }))
+  } catch (e) {
+    resetFeedback.error(message(e))
   } finally {
     statsBusy.value = false
   }
@@ -369,18 +385,18 @@ function orderLabel(order: PlayOrder): string {
       <p v-else class="muted">{{ t('show.statNone') }}</p>
 
       <SettingRow :label="t('show.restartCycle')" :hint="t('show.restartCycleHint')">
-        <button class="secondary" :disabled="statsBusy" @click="onRestartCycle">
+        <SsFeedback :feedback="restartFeedback.feedback.value" />
+        <SsButton variant="secondary" :disabled="statsBusy" @click="onRestartCycle">
           {{ t('show.restartCycle') }}
-        </button>
+        </SsButton>
       </SettingRow>
 
       <SettingRow :label="t('show.resetHistory')" :hint="t('show.resetHistoryHint')">
-        <button class="danger" :disabled="statsBusy" @click="onResetHistory">
+        <SsFeedback :feedback="resetFeedback.feedback.value" />
+        <SsButton variant="danger" :disabled="statsBusy" @click="onResetHistory">
           {{ t('show.resetHistory') }}
-        </button>
+        </SsButton>
       </SettingRow>
-
-      <p v-if="notice" class="notice">{{ notice }}</p>
     </section>
 
     <section>
@@ -524,8 +540,8 @@ function orderLabel(order: PlayOrder): string {
 .stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 28px;
-  margin: 0 0 12px;
+  gap: var(--ss-space-1) var(--ss-space-4);
+  margin: var(--ss-space-2) 0 12px;
 }
 
 .stats div {
@@ -536,23 +552,24 @@ function orderLabel(order: PlayOrder): string {
 
 .stats dt {
   order: 2;
-  font-size: 13px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
 }
 
 /* Die Zahl zuerst und groesser: sie ist die Antwort, die Beschriftung nur
-   die Frage dazu. */
+   die Frage dazu. Kennzahlen stehen in der Display-Schrift (E-60). */
 .stats dd {
   order: 1;
   margin: 0;
-  font-size: 22px;
+  font-family: var(--ss-font-display);
+  font-size: var(--ss-fs-xl);
   font-variant-numeric: tabular-nums;
   color: var(--ss-accent);
 }
 
 .progress-line {
-  margin: 0 0 16px;
-  font-size: 13px;
+  margin: 0 0 var(--ss-space-2);
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
 }
 
@@ -563,8 +580,8 @@ function orderLabel(order: PlayOrder): string {
 .tops {
   display: flex;
   flex-wrap: wrap;
-  gap: 24px;
-  margin-bottom: 18px;
+  gap: var(--ss-space-3);
+  margin-bottom: var(--ss-space-2);
 }
 
 .top {
@@ -575,7 +592,7 @@ function orderLabel(order: PlayOrder): string {
 .top ol {
   margin: 6px 0 0;
   padding-left: 20px;
-  font-size: 13px;
+  font-size: var(--ss-fs-m);
 }
 
 .top li {
@@ -599,32 +616,25 @@ function orderLabel(order: PlayOrder): string {
   color: var(--ss-text-dim);
 }
 
-.notice {
-  margin: 4px 0 0;
-  font-size: 13px;
-  color: var(--ss-accent);
-}
-
 .pane {
   height: 100%;
   padding-right: 8px;
 }
 
 section {
-  margin-bottom: 28px;
+  margin-bottom: var(--ss-space-4);
 }
 
 section > .ss-label {
   display: block;
-  margin-bottom: 6px;
 }
 
 .narrow {
-  width: 150px;
+  width: 160px;
 }
 
 .wide {
-  width: 200px;
+  width: 240px;
 }
 
 /* Jahre und Absender als Chips: eine Mehrfachauswahl mit zwanzig Jahren
@@ -632,26 +642,26 @@ section > .ss-label {
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--ss-space-1);
 }
 
 .chip {
-  padding: 6px 14px;
+  padding: 0 var(--ss-space-2);
   border: 1px solid var(--ss-border-strong);
   border-radius: var(--ss-radius-pill);
-  font-size: 13px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-muted);
   transition: background var(--ss-transition), color var(--ss-transition);
 }
 
 .chip.active {
   background: var(--ss-surface-accent);
-  color: var(--ss-accent);
+  color: var(--ss-selected-text);
 }
 
 .chip .count {
   margin-left: 6px;
-  font-size: 11px;
+  font-size: var(--ss-fs-s);
   color: var(--ss-text-faint);
   font-variant-numeric: tabular-nums;
 }
@@ -663,20 +673,19 @@ section > .ss-label {
 }
 
 .slider input {
-  width: 180px;
-  accent-color: var(--ss-accent);
+  width: 240px;
 }
 
 .value {
-  font-size: 14px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
-  min-width: 46px;
+  min-width: 48px;
   font-variant-numeric: tabular-nums;
 }
 
 .muted {
   padding: 10px 0;
-  font-size: 14px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
 }
 

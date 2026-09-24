@@ -2,9 +2,9 @@
 /**
  * Schalter im Stil des Entwurfs (Artboard „Einstellungen · Quellen").
  *
- * Maße direkt aus der Vorlage: 52 × 30 mit 24er Knopf. Die Trefferfläche ist
- * über ein unsichtbares Polster auf 44 px vergrößert (FA-40) — der sichtbare
- * Schalter bleibt dabei genau so groß wie gezeichnet.
+ * Maße aus der Vorlage (E-63): 52 × 32 mit 24er Knopf und 4 px Rand. Die
+ * Trefferfläche ist über ein unsichtbares Polster auf das Tippziel von 48 px
+ * vergrößert (FA-40) — der sichtbare Schalter bleibt so groß wie gezeichnet.
  */
 const model = defineModel<boolean>({ required: true })
 
@@ -44,7 +44,7 @@ defineProps<{
 }
 
 .toggle:disabled {
-  opacity: 0.45;
+  opacity: var(--ss-opacity-disabled);
   cursor: default;
 }
 
@@ -53,8 +53,8 @@ defineProps<{
   align-items: center;
   justify-content: flex-start;
   width: 52px;
-  height: 30px;
-  padding: 0 3px;
+  height: 32px;
+  padding: 0 4px;
   border-radius: var(--ss-radius-pill);
   background: var(--ss-toggle-off);
   transition: background var(--ss-transition);
@@ -62,7 +62,7 @@ defineProps<{
 
 .track.on {
   justify-content: flex-end;
-  background: var(--ss-accent);
+  background: var(--ss-toggle-on);
 }
 
 .knob {
@@ -74,6 +74,6 @@ defineProps<{
 }
 
 .track.on .knob {
-  background: var(--ss-bg);
+  background: var(--ss-toggle-knob-on);
 }
 </style>

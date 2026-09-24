@@ -24,7 +24,7 @@ body {
   background: var(--ss-bg);
   color: var(--ss-text-body);
   font-family: var(--ss-font-ui);
-  font-size: 15px;
+  font-size: var(--ss-fs-l);
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
 
@@ -38,6 +38,12 @@ body {
    * nicht wie eine Webseite anfühlen. */
   overscroll-behavior: none;
   touch-action: manipulation;
+
+  /* Keine Tipphervorhebung der WebView (E-65). Android legt sonst beim
+   * Antippen einen hellblauen Kasten über jedes Bedienelement — auf dem
+   * Rahmen die einzige fremde Farbe. Die Knöpfe zeigen ihren gedrückten
+   * Zustand selbst (E-58); vererbt sich auf alles darunter. */
+  -webkit-tap-highlight-color: transparent;
 
   /* Bewusst keine `safe-area`-Polsterung (FA-01).
    *
@@ -93,13 +99,21 @@ input[type='time'],
 input[type='url'],
 select {
   min-height: var(--ss-touch-target);
-  padding: 0 14px;
-  background: var(--ss-bg);
+  padding: 0 16px;
+  background: var(--ss-input-bg);
   color: var(--ss-text-body);
   border: 1px solid var(--ss-border-strong);
-  border-radius: var(--ss-radius-nav);
+  border-radius: var(--ss-radius-sm);
   font: inherit;
+  font-size: var(--ss-fs-l);
   width: 100%;
+}
+
+/* Regler und Optionsfelder bleiben nativ und übernehmen nur die Füllfarbe
+ * des Schalters — im hellen Bild das dunklere Messing (E-64). */
+input[type='range'],
+input[type='radio'] {
+  accent-color: var(--ss-toggle-on);
 }
 
 input::placeholder {
@@ -120,14 +134,14 @@ input::placeholder {
 /* Wortmarke — Cormorant Garamond, wie im Design-Canvas. */
 .ss-wordmark {
   font-family: var(--ss-font-display);
-  font-size: 26px;
+  font-size: var(--ss-fs-brand);
   color: var(--ss-text);
   letter-spacing: 0.04em;
 }
 
 /* Kleine Versalien-Beschriftung, im Entwurf durchgängig verwendet. */
 .ss-label {
-  font-size: 12px;
+  font-size: var(--ss-fs-s);
   font-weight: 500;
   color: var(--ss-text-faint);
   letter-spacing: 0.2em;
@@ -137,25 +151,32 @@ input::placeholder {
 /* Segmentierte Auswahl fuer zwei bis drei gleichrangige Werte.
  * Liegt global, weil sie in mehreren Bereichen der Einstellungen vorkommt
  * (Bildanpassung FA-05, Uhrstil E-20) — dreimal dieselbe Regel scoped zu
- * wiederholen, laesst die Varianten frueher oder spaeter auseinanderlaufen. */
+ * wiederholen, laesst die Varianten frueher oder spaeter auseinanderlaufen.
+ *
+ * Seit E-63 mit 3 px Rahmenabstand: 42 px Segment plus Rahmen ergeben das
+ * Tippziel von 48 px, das gewaehlte Segment sitzt als eigene Pille im Rahmen. */
 .ss-segmented {
   display: flex;
+  gap: 2px;
+  padding: 3px;
   border: 1px solid var(--ss-border-strong);
   border-radius: var(--ss-radius-pill);
-  overflow: hidden;
 }
 
 .ss-segment {
-  padding: 0 20px;
-  min-height: 40px;
-  font-size: 14px;
+  padding: 0 18px;
+  min-height: 42px;
+  border-radius: var(--ss-radius-pill);
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-muted);
+  white-space: nowrap;
   transition: background var(--ss-transition), color var(--ss-transition);
 }
 
 .ss-segment.active {
   background: var(--ss-surface-accent);
-  color: var(--ss-accent);
+  color: var(--ss-selected-text);
+  font-weight: 500;
 }
 
 /* NF-11: Wer Bewegung reduziert haben möchte, bekommt keine Überblendungen

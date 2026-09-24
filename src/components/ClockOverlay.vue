@@ -56,7 +56,8 @@ const date = computed(() => formatDateLine(now.value, localeTag(props.language))
 }
 
 .time {
-  font-size: 92px;
+  /* 92 px, bei ≤ 900 px Breite 64 px — beides im Token (E-60). */
+  font-size: var(--ss-fs-clock);
   font-weight: 400;
   line-height: 1;
   color: var(--ss-text);
@@ -79,7 +80,7 @@ const date = computed(() => formatDateLine(now.value, localeTag(props.language))
 }
 
 .date {
-  font-size: 15px;
+  font-size: var(--ss-fs-date);
   font-weight: 500;
   color: rgba(242, 239, 233, 0.72);
   letter-spacing: 0.22em;
@@ -88,10 +89,6 @@ const date = computed(() => formatDateLine(now.value, localeTag(props.language))
 }
 
 @media (max-width: 900px) {
-  .time {
-    font-size: 64px;
-  }
-
   .dial {
     width: 112px;
     height: 112px;

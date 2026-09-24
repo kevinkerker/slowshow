@@ -65,7 +65,7 @@ const visible = computed(() => title.value !== '' || meta.value !== '')
 .title {
   font-family: var(--ss-font-display);
   font-style: italic;
-  font-size: 24px;
+  font-size: var(--ss-fs-caption);
   line-height: 1.2;
   color: rgba(242, 239, 233, 0.85);
   text-shadow: 0 1px 16px rgba(0, 0, 0, 0.5);
@@ -77,7 +77,7 @@ const visible = computed(() => title.value !== '' || meta.value !== '')
 }
 
 .meta {
-  font-size: 12px;
+  font-size: var(--ss-fs-s);
   font-weight: 500;
   color: rgba(242, 239, 233, 0.55);
   letter-spacing: 0.18em;

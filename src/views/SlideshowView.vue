@@ -1,9 +1,13 @@
 <script setup lang="ts">
 /**
- * Die Diashow — Hauptansicht der App (Artboard „Diashow").
+ * Die Diashow — Hauptansicht der App (Artboards D1–D6).
  *
  * Vollbild, Endlosschleife, Bedienung ausschließlich über Gesten. Außerhalb der
  * Aktivzeit übernimmt der Nachtmodus (FA-52, FA-54).
+ *
+ * Immer dunkel, auch wenn das System hell eingestellt ist (E-64): das Foto
+ * ist die einzige helle Fläche, und nachts bleibt der Schirm dunkel. Die
+ * Klasse `ss-always-dark` an der Wurzel setzt dafür den dunklen Tokensatz.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -12,6 +16,7 @@ import SlideStage from '@/components/SlideStage.vue'
 import ClockOverlay from '@/components/ClockOverlay.vue'
 import CaptionOverlay from '@/components/CaptionOverlay.vue'
 import NightClock from '@/components/NightClock.vue'
+import SsButton from '@/components/SsButton.vue'
 import { useConfigStore } from '@/stores/config'
 import { useSlideshowStore } from '@/stores/slideshow'
 import { createGestureRecognizer } from '@/composables/useGestures'
@@ -81,6 +86,27 @@ const showWaiting = computed(
 async function countWaiting() {
   waiting.value = await api.quarantineCount()
 }
+
+/**
+ * Der Hinweis führt dorthin, wo die wartenden Fotos zu sehen sind: in den
+ * Bild-Browser, Filter „Wartet auf Freigabe". Vorher öffnete er die
+ * Einstellungen bei den Quellen, wo von den Fotos nichts zu sehen ist.
+ */
+function openQuarantine() {
+  router.push({ path: '/settings', query: { pane: 'images', filter: 'quarantine' } })
+}
+
+/**
+ * Aufwachzeit für die Nachtuhr — nur, wenn der Zeitplan sie bestimmt.
+ *
+ * Ohne Zeitplan ruht der Rahmen, weil Home Assistant ihn schlafen gelegt hat,
+ * und zwar bis zum Gegenbefehl (FA-55). „Ruhemodus bis 07:00" nannte dann
+ * eine Zeit, zu der nichts geschieht. Mit Zeitplan stimmt die Zeit auch nach
+ * einem Fernbefehl: der verfällt beim nächsten Umschalten des Plans.
+ */
+const resumeAt = computed(() =>
+  cfg.value?.schedule.enabled ? cfg.value.schedule.activeFrom : null,
+)
 
 // ── Gesten (FA-41, FA-43) ────────────────────────────────────────────────────
 
@@ -176,7 +202,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    class="slideshow"
+    class="slideshow ss-always-dark"
     @pointerdown="gestures.down($event.clientX, $event.clientY)"
     @pointermove="gestures.move($event.clientX, $event.clientY)"
     @pointerup="gestures.up($event.clientX, $event.clientY, ($event.currentTarget as HTMLElement).clientWidth)"
@@ -223,15 +249,15 @@ onBeforeUnmount(() => {
       <h1 class="ss-wordmark">{{ t('app.name') }}</h1>
       <p class="empty-title">{{ t('slideshow.empty') }}</p>
       <p class="empty-hint">{{ t('slideshow.emptyHint') }}</p>
-      <button class="empty-action" @click="router.push('/settings')">
+      <SsButton variant="primary" class="empty-action" @click="router.push('/settings')">
         {{ t('slideshow.addSource') }}
-      </button>
+      </SsButton>
     </div>
 
     <!-- Nachtmodus liegt über allem (FA-54). -->
     <NightClock
       v-if="!active && nightClock && cfg"
-      :resume-at="cfg.schedule.activeFrom"
+      :resume-at="resumeAt"
       :clock-style="cfg.schedule.nightClockStyle"
       :pixel-shift="cfg.overlays.pixelShift"
     />
@@ -255,9 +281,9 @@ onBeforeUnmount(() => {
           class="waiting"
           @pointerdown.stop
           @pointerup.stop
-          @click.stop="router.push('/settings')"
+          @click.stop="openQuarantine"
         >
-          {{ t('slideshow.waiting', { n: waiting }) }}
+          {{ t('slideshow.waiting', { n: waiting }, waiting) }}
         </button>
       </Transition>
 
@@ -324,7 +350,7 @@ onBeforeUnmount(() => {
   right: 0;
   bottom: 0;
   height: 220px;
-  background: linear-gradient(180deg, rgba(5, 5, 6, 0) 0%, rgba(5, 5, 6, 0.55) 100%);
+  background: var(--ss-clock-scrim);
   pointer-events: none;
 }
 
@@ -337,39 +363,32 @@ onBeforeUnmount(() => {
   justify-content: center;
   gap: 10px;
   text-align: center;
-  padding: 32px;
+  padding: var(--ss-space-4);
 }
 
+/* `h1` bringt sonst Fettdruck mit, und Cormorant liegt nur bis 400 bei —
+   der Browser fettete die Wortmarke dann künstlich. */
 .empty .ss-wordmark {
-  font-size: 42px;
+  font-size: var(--ss-fs-brand-lg);
+  font-weight: 400;
   margin-bottom: 12px;
 }
 
 .empty-title {
-  font-size: 17px;
+  font-size: var(--ss-fs-l);
   color: var(--ss-text-strong);
 }
 
 .empty-hint {
-  font-size: 14px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
   max-width: 32ch;
 }
 
+/* Der einzige Knopf dieser Ansicht und der Weg aus ihr heraus: Primär (E-58),
+   vorher ein Rand in Messing. */
 .empty-action {
-  margin-top: 18px;
-  padding: 0 26px;
-  border: 1px solid var(--ss-accent);
-  border-radius: var(--ss-radius-pill);
-  color: var(--ss-accent);
-  font-size: 15px;
-  font-weight: 500;
-  transition: background var(--ss-transition), color var(--ss-transition);
-}
-
-.empty-action:active {
-  background: var(--ss-accent);
-  color: var(--ss-bg);
+  margin-top: var(--ss-space-2);
 }
 
 .top-stack {
@@ -392,11 +411,11 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 11px;
   padding: 9px 20px;
-  background: rgba(10, 10, 10, 0.82);
+  background: var(--ss-overlay-scrim);
   border: 1px solid var(--ss-border-strong);
   border-radius: var(--ss-radius-pill);
   color: var(--ss-accent);
-  font-size: 12px;
+  font-size: var(--ss-fs-s);
   font-weight: 500;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -416,9 +435,9 @@ onBeforeUnmount(() => {
   padding: 9px 20px;
   border: 1px solid var(--ss-border-strong);
   border-radius: var(--ss-radius-pill);
-  background: rgba(10, 10, 10, 0.82);
+  background: var(--ss-overlay-scrim);
   color: var(--ss-accent);
-  font-size: 12px;
+  font-size: var(--ss-fs-s);
   font-weight: 500;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -427,11 +446,11 @@ onBeforeUnmount(() => {
 
 .toast {
   padding: 10px 22px;
-  background: rgba(10, 10, 10, 0.82);
+  background: var(--ss-overlay-scrim);
   border: 1px solid var(--ss-border-strong);
   border-radius: var(--ss-radius-pill);
   color: var(--ss-text-body);
-  font-size: 14px;
+  font-size: var(--ss-fs-m);
   letter-spacing: 0.04em;
 }
 

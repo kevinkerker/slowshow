@@ -1,14 +1,16 @@
 <script setup lang="ts">
 /**
- * Quellenverwaltung (Artboard „Einstellungen · Quellen").
+ * Quellenverwaltung (Artboard S1).
  *
  * Liste, Hinzufügen-Feld und die Cache-Fußzeile — genau der Aufbau aus dem
  * Entwurf.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowReactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SourceCard from '../SourceCard.vue'
 import SourceDialog from '../SourceDialog.vue'
+import { confirmAction } from '@/composables/useConfirm'
+import { useFeedback, type Feedback } from '@/composables/useFeedback'
 import { useConfigStore } from '@/stores/config'
 import { formatBytes } from '@/lib/format'
 import { localeTag } from '@/lib/i18n'
@@ -29,8 +31,24 @@ const store = useConfigStore()
 
 const dialogOpen = ref(false)
 const editing = ref<Source | null>(null)
-const notice = ref<string | null>(null)
 const saveError = ref('')
+
+/**
+ * Rückmeldung je Quelle (E-62). Erst beim ersten Abgleich angelegt; laufen
+ * mehrere Quellen nacheinander (E-43), behält jede ihr eigenes Ergebnis.
+ */
+const feedbacks = shallowReactive(new Map<string, Feedback>())
+
+function feedbackFor(id: string): Feedback {
+  let entry = feedbacks.get(id)
+  if (!entry) {
+    entry = useFeedback()
+    feedbacks.set(id, entry)
+  }
+  return entry
+}
+
+onBeforeUnmount(() => feedbacks.forEach((f) => f.dispose()))
 
 const stats = computed(() => store.stats)
 const locale = computed(() => localeTag(store.config?.language ?? 'auto'))
@@ -82,8 +100,17 @@ async function toggle(source: Source, enabled: boolean) {
   await store.updateSource({ ...source, enabled })
 }
 
+/** Rückfrage vor dem Entfernen (E-59). */
+function askRemove(source: Source): Promise<boolean> {
+  return confirmAction(
+    t('sources.removeTitle', { name: source.name }),
+    t('sources.removeBody'),
+    t('sourceForm.removeSource'),
+  )
+}
+
 async function remove(source: Source) {
-  if (!confirm(t('sources.removeConfirm', { name: source.name }))) return
+  if (!(await askRemove(source))) return
   await store.removeSource(source.id)
 }
 
@@ -91,7 +118,7 @@ async function remove(source: Source) {
 async function onRemove(id: string) {
   const source = store.sources.find((s) => s.id === id)
   if (!source) return
-  if (!confirm(t('sources.removeConfirm', { name: source.name }))) return
+  if (!(await askRemove(source))) return
   try {
     await store.removeSource(id)
     dialogOpen.value = false
@@ -102,15 +129,21 @@ async function onRemove(id: string) {
 
 async function sync(source: Source) {
   const report = await store.syncSource(source.id)
-  notice.value = describe(report)
-  setTimeout(() => (notice.value = null), 6000)
+  const feedback = feedbackFor(source.id)
+  const result = describe(report)
+  if (result.failed) feedback.error(result.text)
+  else feedback.ok(result.text)
 }
 
 /** Ergebnis eines Sync-Laufs in einem Satz. */
-function describe(report: SyncReport | null): string {
-  if (!report) return store.error ? t('sources.syncFailed', { error: store.error }) : ''
-  if (report.error) return t('sources.syncFailed', { error: report.error })
-  if (report.truncated) return t('sources.syncTruncated')
+function describe(report: SyncReport | null): { text: string; failed: boolean } {
+  if (!report) {
+    return store.error
+      ? { text: t('sources.syncFailed', { error: store.error }), failed: true }
+      : { text: '', failed: false }
+  }
+  if (report.error) return { text: t('sources.syncFailed', { error: report.error }), failed: true }
+  if (report.truncated) return { text: t('sources.syncTruncated'), failed: false }
   const parts: string[] = []
   if (report.added + report.updated + report.removed === 0) {
     parts.push(t('sources.syncNothing'))
@@ -128,7 +161,7 @@ function describe(report: SyncReport | null): string {
   // "Keine Aenderungen" — genau so blieb der IPC-Fehler lange unbemerkt.
   if (report.skipped > 0) parts.push(t('sources.syncSkipped', { n: report.skipped }))
   if (report.failed > 0) parts.push(t('sources.syncFailedCount', { n: report.failed }))
-  return parts.join(' · ')
+  return { text: parts.join(' · '), failed: false }
 }
 </script>
 
@@ -143,6 +176,7 @@ function describe(report: SyncReport | null): string {
         :syncing="store.isSyncing(source.id)"
         :progress="store.progressFor(source.id)"
         :error="store.errorFor(source.id)"
+        :feedback="feedbacks.get(source.id)?.feedback.value ?? null"
         @toggle="(v) => toggle(source, v)"
         @edit="openEdit(source)"
         @sync="sync(source)"
@@ -157,8 +191,6 @@ function describe(report: SyncReport | null): string {
         </svg>
         <span>{{ t('sources.add') }}</span>
       </button>
-
-      <p v-if="notice" class="notice">{{ notice }}</p>
     </div>
 
     <!-- Fußzeile mit Cache-Auslastung, wie im Entwurf. -->
@@ -199,16 +231,16 @@ function describe(report: SyncReport | null): string {
 .list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   flex-grow: 1;
   min-height: 0;
   padding-bottom: 8px;
 }
 
 .empty {
-  padding: 28px 0;
+  padding: var(--ss-space-4) 0;
   text-align: center;
-  font-size: 15px;
+  font-size: var(--ss-fs-l);
   color: var(--ss-text-dim);
 }
 
@@ -217,11 +249,12 @@ function describe(report: SyncReport | null): string {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  padding: 18px;
+  min-height: 64px;
+  flex-shrink: 0;
   border: 1px dashed var(--ss-border-dashed);
-  border-radius: var(--ss-radius-card);
+  border-radius: var(--ss-radius-md);
   color: var(--ss-text-muted);
-  font-size: 15px;
+  font-size: var(--ss-fs-l);
   font-weight: 500;
   transition: color var(--ss-transition), border-color var(--ss-transition);
 }
@@ -231,24 +264,18 @@ function describe(report: SyncReport | null): string {
   border-color: var(--ss-accent);
 }
 
-.notice {
-  padding: 12px 4px 0;
-  font-size: 13px;
-  color: var(--ss-text-dim);
-}
-
 .cache {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--ss-space-2);
   margin-top: auto;
-  padding-top: 18px;
+  padding-top: var(--ss-space-2);
   border-top: 1px solid var(--ss-border-soft);
   flex-shrink: 0;
 }
 
 .cache-text {
-  font-size: 13px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
   white-space: nowrap;
 }

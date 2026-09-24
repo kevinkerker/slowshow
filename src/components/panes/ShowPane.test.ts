@@ -1,7 +1,8 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import ShowPane from './ShowPane.vue'
+import { CANCEL, confirmRequest, settle } from '@/composables/useConfirm'
 import { i18n } from '@/lib/i18n'
 import * as api from '@/lib/api'
 import { useConfigStore } from '@/stores/config'
@@ -19,6 +20,11 @@ import type { AppConfig, PlaybackStats } from '@/lib/types'
 beforeAll(() => {
   i18n.global.locale.value = 'de'
 })
+
+// Rueckfragen teilen sich einen Zustand (E-59); keine darf offen bleiben.
+afterEach(() => settle(CANCEL))
+
+const flush = () => new Promise((r) => setTimeout(r, 0))
 
 const STATS: PlaybackStats = {
   total: 597,
@@ -121,49 +127,63 @@ describe('ShowPane — Durchlauf und Statistik', () => {
     // F2 ist nicht destruktiv: nur die Urne wird geleert. Eine Rueckfrage
     // waere hier bloss im Weg.
     const restart = vi.spyOn(api, 'restartCycle').mockResolvedValue()
-    const confirmSpy = vi.fn(() => true)
-    vi.stubGlobal('confirm', confirmSpy)
 
     const w = await pane()
     const knopf = w.findAll('button').find((b) => b.text() === 'Durchlauf neu starten')
     expect(knopf, 'Schaltflaeche nicht gefunden').toBeTruthy()
     await knopf!.trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    await flush()
 
     expect(restart).toHaveBeenCalled()
-    expect(confirmSpy).not.toHaveBeenCalled()
-    vi.unstubAllGlobals()
+    expect(confirmRequest.value).toBeNull()
+  })
+
+  it('meldet den Neustart neben seinem Knopf', async () => {
+    // E-62: die Rueckmeldung steht beim Ausloeser, nicht als Zeile unter dem
+    // Abschnitt.
+    vi.spyOn(api, 'restartCycle').mockResolvedValue()
+    const w = await pane()
+    const knopf = w.findAll('button').find((b) => b.text() === 'Durchlauf neu starten')
+    await knopf!.trigger('click')
+    await flush()
+    await w.vm.$nextTick()
+
+    const zeile = w.findAll('.row').find((r) => r.text().includes('Mischt neu'))
+    expect(zeile?.find('.ss-feedback .ok').text()).toBe('Durchlauf beginnt von vorn.')
   })
 
   it('fragt vor dem Zuruecksetzen der Historie und nennt die Zahl', async () => {
     const reset = vi.spyOn(api, 'resetHistory').mockResolvedValue(214)
-    const confirmSpy = vi.fn((_text?: string) => true)
-    vi.stubGlobal('confirm', confirmSpy)
 
     const w = await pane()
     const knopf = w.findAll('button').find((b) => b.text() === 'Anzeige-Historie zurücksetzen')
+    // Destruktiv, also in der Gefahrenfarbe (E-58) — vorher ungestaltet.
+    expect(knopf!.classes()).toContain('ss-btn--danger')
     await knopf!.trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    await flush()
 
-    expect(confirmSpy).toHaveBeenCalled()
+    const frage = confirmRequest.value
+    expect(frage, 'keine Rueckfrage offen').toBeTruthy()
     // Die Zahl gehoert in die Frage: sonst muesste jemand raten, wie viel er
     // gerade verwirft.
-    expect(String(confirmSpy.mock.calls[0]?.[0])).toContain('214')
+    expect(frage!.title).toContain('214')
+    expect(frage!.actions[0].variant).toBe('danger')
+    settle('confirm')
+    await flush()
     expect(reset).toHaveBeenCalled()
-    vi.unstubAllGlobals()
   })
 
   it('setzt nichts zurueck, wenn die Rueckfrage verneint wird', async () => {
     const reset = vi.spyOn(api, 'resetHistory').mockResolvedValue(0)
-    vi.stubGlobal('confirm', vi.fn(() => false))
 
     const w = await pane()
     const knopf = w.findAll('button').find((b) => b.text() === 'Anzeige-Historie zurücksetzen')
     await knopf!.trigger('click')
-    await new Promise((r) => setTimeout(r, 0))
+    await flush()
+    settle(CANCEL)
+    await flush()
 
     expect(reset).not.toHaveBeenCalled()
-    vi.unstubAllGlobals()
   })
 
   it('kommt ohne Statistik aus, statt die Seite zu verlieren', async () => {

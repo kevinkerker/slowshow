@@ -173,14 +173,14 @@ const overnight = computed(() => {
 .state {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 24px;
-  padding: 14px 18px;
+  gap: 12px;
+  margin-bottom: var(--ss-space-1);
+  padding: 18px var(--ss-space-3);
   border: 1px solid var(--ss-border);
-  border-radius: var(--ss-radius-card);
+  border-radius: var(--ss-radius-md);
   background: var(--ss-surface);
-  font-size: 14px;
-  color: var(--ss-text-accent);
+  font-size: var(--ss-fs-l);
+  color: var(--ss-accent);
 }
 
 .state.resting {
@@ -199,12 +199,11 @@ const overnight = computed(() => {
 }
 
 section {
-  margin-bottom: 28px;
+  margin-bottom: var(--ss-space-4);
 }
 
 section > .ss-label {
   display: block;
-  margin-bottom: 6px;
 }
 
 .time {
@@ -219,14 +218,13 @@ section > .ss-label {
 }
 
 .slider input {
-  width: 180px;
-  accent-color: var(--ss-accent);
+  width: 240px;
 }
 
 .value {
-  font-size: 14px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
-  min-width: 46px;
+  min-width: 48px;
   font-variant-numeric: tabular-nums;
 }
 </style>

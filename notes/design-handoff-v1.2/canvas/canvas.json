@@ -1,0 +1,424 @@
+{
+  "artboards": [
+    {
+      "file": "D1-Diashow.dc.html",
+      "title": "D1 · Diashow mit allen Einblendungen",
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "D2-Diashow-Zustaende.dc.html",
+      "title": "D2 · Diashow: pausiert, Fotos warten, Toast",
+      "x": 1440,
+      "y": 0,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "D3-Diashow-Analoguhr.dc.html",
+      "title": "D3 · Diashow mit Analoguhr",
+      "x": 2880,
+      "y": 0,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "D4-Paar-Modus.dc.html",
+      "title": "D4 · Paar-Modus",
+      "x": 4320,
+      "y": 0,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "D5-Leerzustand.dc.html",
+      "title": "D5 · Leerzustand „Noch keine Bilder“",
+      "x": 0,
+      "y": 1060,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "D6-Nachtmodus-Ziffern.dc.html",
+      "title": "D6 · Nachtmodus · Ziffern",
+      "x": 1440,
+      "y": 1060,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "D6-Nachtmodus-Zeiger.dc.html",
+      "title": "D6 · Nachtmodus · Zeiger",
+      "x": 2880,
+      "y": 1060,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "S1-Einstellungen-Quellen.dc.html",
+      "title": "S1 · Einstellungen · Quellen",
+      "x": 0,
+      "y": 2260,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "S2-Einstellungen-Bilder.dc.html",
+      "title": "S2 · Einstellungen · Bilder (Wartet auf Freigabe)",
+      "x": 1440,
+      "y": 2260,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "S3-Einstellungen-Diashow.dc.html",
+      "title": "S3 · Einstellungen · Diashow (oben)",
+      "x": 2880,
+      "y": 2260,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "S3-Einstellungen-Diashow-Statistik.dc.html",
+      "title": "S3 · Einstellungen · Diashow (Statistik)",
+      "x": 4320,
+      "y": 2260,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "S4-Einstellungen-Zeitplan.dc.html",
+      "title": "S4 · Einstellungen · Zeitplan",
+      "x": 0,
+      "y": 3320,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "S5-Einstellungen-System.dc.html",
+      "title": "S5 · Einstellungen · System (oben)",
+      "x": 1440,
+      "y": 3320,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "S5-Einstellungen-System-MQTT.dc.html",
+      "title": "S5 · Einstellungen · System (MQTT bis Über)",
+      "x": 2880,
+      "y": 3320,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "G1-Dialog-Quelle-hinzufuegen.dc.html",
+      "title": "G1 · Dialog „Quelle hinzufügen“",
+      "x": 0,
+      "y": 4520,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "G1-Dialog-Postfach-bearbeiten.dc.html",
+      "title": "G1 · Dialog „Postfach bearbeiten“",
+      "x": 1440,
+      "y": 4520,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "G2-Dialog-Foto-freigeben.dc.html",
+      "title": "G2 · Dialog „Foto freigeben“",
+      "x": 2880,
+      "y": 4520,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "G3-Dialog-Diagnosebericht.dc.html",
+      "title": "G3 · Dialog Diagnosebericht",
+      "x": 4320,
+      "y": 4520,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "G4-Rueckfrage-nativ.dc.html",
+      "title": "G4 · Rückfrage (heute nativ)",
+      "x": 0,
+      "y": 5580,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "I1-App-Icon.dc.html",
+      "title": "I1 · App-Icon nach E-27",
+      "x": 0,
+      "y": 6780,
+      "w": 1280,
+      "h": 560
+    },
+    {
+      "file": "F4-Option-A.dc.html",
+      "title": "F4 · Option A · Fläche und Rand",
+      "x": 0,
+      "y": -6300,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "F4-Option-B.dc.html",
+      "title": "F4 · Option B · Tonal, ohne Linien",
+      "x": 1440,
+      "y": -6300,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "F4-Option-C.dc.html",
+      "title": "F4 · Option C · Messing als Linie",
+      "x": 2880,
+      "y": -6300,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "F6-Option-A.dc.html",
+      "title": "F6 · Option A · Sieben neutrale Stufen",
+      "x": 0,
+      "y": -5040,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "F6-Option-B.dc.html",
+      "title": "F6 · Option B · Rollen statt Größen",
+      "x": 1440,
+      "y": -5040,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "F6-Option-C.dc.html",
+      "title": "F6 · Option C · Vier Stufen",
+      "x": 2880,
+      "y": -5040,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "F7-Option-A.dc.html",
+      "title": "F7 · Option A · Klein und groß",
+      "x": 0,
+      "y": -3780,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "F7-Option-B.dc.html",
+      "title": "F7 · Option B · Drei Stufen",
+      "x": 1440,
+      "y": -3780,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "F7-Option-C.dc.html",
+      "title": "F7 · Option C · Fläche oder Pille",
+      "x": 2880,
+      "y": -3780,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "F5-Option-A.dc.html",
+      "title": "F5 · Option A · Dialog in der Mitte",
+      "x": 0,
+      "y": -2520,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "F5-Option-B.dc.html",
+      "title": "F5 · Option B · Rückfrage am Auslöser",
+      "x": 1440,
+      "y": -2520,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "F5-Option-C.dc.html",
+      "title": "F5 · Option C · Blatt vom unteren Rand",
+      "x": 2880,
+      "y": -2520,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "F8-Option-A.dc.html",
+      "title": "F8 · Option A · Bleibt stehen",
+      "x": 0,
+      "y": -1260,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "F8-Option-B.dc.html",
+      "title": "F8 · Option B · Verblasst nach 6 s",
+      "x": 1440,
+      "y": -1260,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "F8-Option-C.dc.html",
+      "title": "F8 · Option C · Statuszeile darunter",
+      "x": 2880,
+      "y": -1260,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Vorschlag-Grundlagen.dc.html",
+      "title": "V1 · Grundlagen · Tokens",
+      "x": 0,
+      "y": -8700,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Vorschlag-Knoepfe.dc.html",
+      "title": "V2 · E-58 · Knöpfe (F4 · A)",
+      "x": 1440,
+      "y": -8700,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Vorschlag-Rueckfrage.dc.html",
+      "title": "V3 · E-59 · Rückfrage (F5 · A)",
+      "x": 2880,
+      "y": -8700,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Vorschlag-Rueckmeldung.dc.html",
+      "title": "V4 · E-62 · Rückmeldung (F8 · B)",
+      "x": 4320,
+      "y": -8700,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Vorschlag-Anwendung-Quellendialog.dc.html",
+      "title": "V5 · Anwendung · Quellendialog",
+      "x": 0,
+      "y": -7640,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Thema-Tokens.dc.html",
+      "title": "T0 · Tokens hell und dunkel",
+      "x": 0,
+      "y": -15060,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Thema-Hell-Quellen.dc.html",
+      "title": "T1 · Hell · Quellen",
+      "x": 0,
+      "y": -14000,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Thema-Dunkel-Quellen.dc.html",
+      "title": "T2 · Dunkel · Quellen (zum Vergleich)",
+      "x": 1440,
+      "y": -14000,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Thema-Hell-Zeitplan.dc.html",
+      "title": "T3 · Hell · Zeitplan",
+      "x": 0,
+      "y": -12940,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Thema-Dunkel-Zeitplan.dc.html",
+      "title": "T4 · Dunkel · Zeitplan",
+      "x": 1440,
+      "y": -12940,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Thema-Hell-Quellendialog.dc.html",
+      "title": "T5 · Hell · Quelle bearbeiten",
+      "x": 0,
+      "y": -11880,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Thema-Dunkel-Quellendialog.dc.html",
+      "title": "T6 · Dunkel · Quelle bearbeiten",
+      "x": 1440,
+      "y": -11880,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Thema-Hell-Rueckfrage.dc.html",
+      "title": "T7 · Hell · Rückfrage",
+      "x": 0,
+      "y": -10820,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Thema-Dunkel-Rueckfrage.dc.html",
+      "title": "T8 · Dunkel · Rückfrage",
+      "x": 1440,
+      "y": -10820,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Thema-Hell-Knoepfe.dc.html",
+      "title": "T9 · Hell · Knöpfe",
+      "x": 0,
+      "y": -9760,
+      "w": 1280,
+      "h": 800
+    },
+    {
+      "file": "Thema-Dunkel-Knoepfe.dc.html",
+      "title": "T10 · Dunkel · Knöpfe",
+      "x": 1440,
+      "y": -9760,
+      "w": 1280,
+      "h": 800
+    }
+  ],
+  "annotations": [
+    {
+      "id": "stil-notiz",
+      "x": 0,
+      "y": -170,
+      "w": 420,
+      "text": "Slowshow – Galerie-minimal:\nTiefschwarz #0A0A0A, Off-White #F2EFE9, Akzent Messing #C2A878.\nIst-Stand v1.1.0 (0dba581). Befunde: nummerierte Marker, siehe Übersicht."
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}

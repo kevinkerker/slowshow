@@ -12,6 +12,11 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ToggleSwitch from './ToggleSwitch.vue'
 import SettingRow from './SettingRow.vue'
+import SsButton from './SsButton.vue'
+import SsFeedback from './SsFeedback.vue'
+import SsIconButton from './SsIconButton.vue'
+import { CANCEL, confirm, confirmAction } from '@/composables/useConfirm'
+import { useFeedback } from '@/composables/useFeedback'
 import * as api from '@/lib/api'
 import { formatRelativeTime } from '@/lib/format'
 import type { Album, FetchLogEntry, ResyncProgress, Source, SourceKind } from '@/lib/types'
@@ -108,7 +113,15 @@ let stopResyncListener: (() => void) | null = null
 
 async function startResync() {
   if (!props.source) return
-  if (!confirm(t('sourceForm.resyncAsk'))) return
+  // Nicht destruktiv, nur langwierig — deshalb die bestaetigende Aktion als
+  // Primaerknopf und nicht in der Gefahrenfarbe (E-59).
+  const go = await confirmAction(
+    t('sourceForm.resyncTitle'),
+    t('sourceForm.resyncBody'),
+    t('sourceForm.resync'),
+    'primary',
+  )
+  if (!go) return
 
   resyncing.value = true
   resyncProgress.value = null
@@ -117,7 +130,7 @@ async function startResync() {
   stopResyncListener = await api.onResyncProgress((p) => (resyncProgress.value = p))
   try {
     const n = await api.resyncMailbox(props.source.id)
-    testResult.value = { ok: true, message: t('sourceForm.resyncDone', { n }) }
+    result.ok(t('sourceForm.resyncDone', { n }))
     await loadFetchState()
   } catch (e) {
     formError.value = message(e)
@@ -166,13 +179,35 @@ async function removeSender(entry: api.AllowedSender) {
 
   // Die Rueckfrage entscheidet ueber die vorhandenen Fotos (E-32). Bei einem
   // Absender ohne Fotos gibt es nichts zu entscheiden -- dann nur bestaetigen.
+  //
+  // Drei Ausgaenge statt OK/Abbrechen (E-59): vorher hiess OK „zurueck in die
+  // Quarantaene" und Abbrechen „sichtbar lassen", und entfernt wurde der
+  // Absender in beiden Faellen — wer abbrechen wollte, konnte es nicht.
+  const title = t('sourceForm.removeSenderTitle', { sender: entry.address })
   let requarantine = false
   if (entry.photoCount === 0) {
-    if (!confirm(t('sourceForm.removeSenderAskEmpty', { sender: entry.address }))) return
-  } else {
-    requarantine = confirm(
-      t('sourceForm.removeSenderAsk', { sender: entry.address, n: entry.photoCount }),
+    const go = await confirmAction(
+      title,
+      t('sourceForm.removeSenderBodyEmpty'),
+      t('sourceForm.removeSender'),
     )
+    if (!go) return
+  } else {
+    const n = entry.photoCount
+    const choice = await confirm({
+      title,
+      body: t('sourceForm.removeSenderBody', { n }, n),
+      actions: [
+        { id: 'keep', label: t('sourceForm.removeSenderKeep'), variant: 'secondary' },
+        {
+          id: 'requarantine',
+          label: t('sourceForm.removeSenderRequarantine', { n }, n),
+          variant: 'danger',
+        },
+      ],
+    })
+    if (choice === CANCEL) return
+    requarantine = choice === 'requarantine'
   }
 
   senderBusy.value = entry.address
@@ -180,13 +215,9 @@ async function removeSender(entry: api.AllowedSender) {
     const moved = await api.removeAllowedSender(props.source.id, entry.address, requarantine)
     senders.value = senders.value.filter((s) => s.address !== entry.address)
     formError.value = ''
-    testResult.value = {
-      ok: true,
-      message:
-        moved > 0
-          ? t('sourceForm.senderRemovedWith', { n: moved })
-          : t('sourceForm.senderRemoved'),
-    }
+    result.ok(
+      moved > 0 ? t('sourceForm.senderRemovedWith', { n: moved }) : t('sourceForm.senderRemoved'),
+    )
   } catch (e) {
     formError.value = message(e)
   } finally {
@@ -197,7 +228,11 @@ async function removeSender(entry: api.AllowedSender) {
 const albums = ref<Album[]>([])
 const loadingAlbums = ref(false)
 const testing = ref(false)
-const testResult = ref<{ ok: boolean; message: string } | null>(null)
+/**
+ * Rückmeldung in der Fußzeile, neben „Verbindung testen" (E-33, E-62).
+ * Erfolg verblasst nach 6 s, ein Fehler bleibt, bis ein Versuch gelingt.
+ */
+const result = useFeedback()
 const formError = ref('')
 const safAvailable = ref(true)
 
@@ -211,7 +246,7 @@ const KINDS: Kind[] = ['local', 'webDav', 'nextcloud', 'mail']
 watch(
   () => props.source,
   (source) => {
-    testResult.value = null
+    result.clear()
     formError.value = ''
     albums.value = []
     password.value = ''
@@ -308,23 +343,17 @@ async function testConnection() {
   const draft = build()
   if (!draft) return
   testing.value = true
-  testResult.value = null
   try {
     const unseen = await api.testSource(draft, password.value)
     // Beim Postfach die Zahl mitnehmen: sie belegt, dass auch der Ordner
     // stimmt, nicht nur die Anmeldung. Andere Quellenarten liefern `null`.
-    testResult.value = {
-      ok: true,
-      message:
-        unseen === null
-          ? t('sourceForm.testOk')
-          : t('sourceForm.testOkMailbox', { n: unseen }, unseen),
-    }
+    result.ok(
+      unseen === null
+        ? t('sourceForm.testOk')
+        : t('sourceForm.testOkMailbox', { n: unseen }, unseen),
+    )
   } catch (e) {
-    testResult.value = {
-      ok: false,
-      message: t('sourceForm.testFailed', { error: message(e) }),
-    }
+    result.error(t('sourceForm.testFailed', { error: message(e) }))
   } finally {
     testing.value = false
   }
@@ -453,11 +482,11 @@ function message(e: unknown): string {
         <h2 class="ss-wordmark">
           {{ isEdit ? t('sourceForm.titleEdit') : t('sourceForm.titleAdd') }}
         </h2>
-        <button class="close" :aria-label="t('common.cancel')" @click="emit('cancel')">
-          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="var(--ss-icon-soft)" stroke-width="1.5" stroke-linecap="round">
+        <SsIconButton :label="t('common.cancel')" @click="emit('cancel')">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
             <path d="M4 4 L16 16 M16 4 L4 16" />
           </svg>
-        </button>
+        </SsIconButton>
       </header>
 
       <div class="body ss-scroll">
@@ -465,7 +494,7 @@ function message(e: unknown): string {
              zwischengespeicherten Bilder ungültig machen. -->
         <fieldset v-if="!isEdit" class="kinds">
           <legend class="ss-label">{{ t('sourceForm.kind') }}</legend>
-          <label v-for="option in KINDS" :key="option" class="kind">
+          <label v-for="option in KINDS" :key="option" class="kind" :class="{ checked: kind === option }">
             <input v-model="kind" type="radio" :value="option" />
             <span class="kind-body">
               <span class="kind-title">{{ t(`sourceForm.kind_${option}`) }}</span>
@@ -544,26 +573,26 @@ function message(e: unknown): string {
               {{ fetchStatus }}
             </p>
             <div class="fetch-actions">
-              <button class="secondary" :disabled="fetching" @click="fetchNow">
+              <SsButton variant="secondary" :busy="fetching" @click="fetchNow">
                 {{ fetching ? t('sourceForm.fetchRunning') : t('sourceForm.fetchNow') }}
-              </button>
-              <button class="link" @click="showLog = !showLog">
+              </SsButton>
+              <SsButton variant="ghost" :aria-expanded="showLog" @click="showLog = !showLog">
                 {{ t('sourceForm.fetchLog') }}
                 <span aria-hidden="true">{{ showLog ? '▾' : '▸' }}</span>
-              </button>
+              </SsButton>
             </div>
 
             <!-- Wartung F8. Steht beim Abrufstand, weil es dieselbe Frage
                  beantwortet — nur gruendlicher. -->
             <div class="resync">
-              <button
+              <SsButton
                 v-if="!resyncing"
-                class="link"
+                variant="link"
                 :title="t('sourceForm.resyncHint')"
                 @click="startResync"
               >
                 {{ t('sourceForm.resync') }}
-              </button>
+              </SsButton>
               <template v-else>
                 <span class="progress">
                   {{
@@ -576,9 +605,9 @@ function message(e: unknown): string {
                       : t('sourceForm.fetchRunning')
                   }}
                 </span>
-                <button class="link" @click="stopResync">
+                <SsButton variant="ghost" @click="stopResync">
                   {{ t('sourceForm.resyncCancel') }}
-                </button>
+                </SsButton>
               </template>
             </div>
 
@@ -646,18 +675,17 @@ function message(e: unknown): string {
                 <span class="sender-count">
                   {{ t('sourceForm.senderPhotos', { n: entry.photoCount }, entry.photoCount) }}
                 </span>
-                <button
+                <SsIconButton
                   class="sender-remove"
-                  :disabled="senderBusy === entry.address"
-                  :aria-label="t('sourceForm.removeSender')"
-                  :title="t('sourceForm.removeSender')"
+                  :label="t('sourceForm.removeSender')"
+                  :busy="senderBusy === entry.address"
                   @click="removeSender(entry)"
                 >
                   <svg width="16" height="16" viewBox="0 0 20 20" fill="none"
                        stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
                     <path d="M5 5 L15 15 M15 5 L5 15" />
                   </svg>
-                </button>
+                </SsIconButton>
               </li>
             </ul>
           </SettingRow>
@@ -677,9 +705,9 @@ function message(e: unknown): string {
             :label="t('sourceForm.chooseFolder')"
             :hint="safPath ? t('sourceForm.folderChosen', { path: safPath }) : undefined"
           >
-            <button class="secondary" :disabled="!safAvailable" @click="chooseFolder">
+            <SsButton variant="secondary" :disabled="!safAvailable" @click="chooseFolder">
               {{ t('sourceForm.chooseFolder') }}
-            </button>
+            </SsButton>
           </SettingRow>
         </template>
 
@@ -718,9 +746,9 @@ function message(e: unknown): string {
                   </option>
                   <option v-for="a in albums" :key="a.name" :value="a.name">{{ a.name }}</option>
                 </select>
-                <button class="secondary" :disabled="loadingAlbums" @click="loadAlbums">
+                <SsButton variant="secondary" :busy="loadingAlbums" @click="loadAlbums">
                   {{ loadingAlbums ? t('sourceForm.testing') : t('sourceForm.loadAlbums') }}
-                </button>
+                </SsButton>
               </div>
             </SettingRow>
 
@@ -778,33 +806,32 @@ function message(e: unknown): string {
              haelt die Liste bewusst ruhig, und eine Ebene tiefer ist ein
              destruktiver Schritt auf einem Touchgeraet besser aufgehoben
              (FA-43). Die Rueckfrage stellt der aufrufende Bereich. -->
-        <button
+        <SsButton
           v-if="isEdit && props.source"
-          class="danger"
+          variant="danger"
+          class="remove"
           @click="emit('remove', props.source.id)"
         >
           {{ t('sourceForm.removeSource') }}
-        </button>
-        <button
+        </SsButton>
+        <SsButton
           v-if="isRemote || kind === 'mail'"
-          class="secondary"
-          :disabled="testing"
+          variant="secondary"
+          :busy="testing"
           @click="testConnection"
         >
           {{ testing ? t('sourceForm.testing') : t('sourceForm.test') }}
-        </button>
+        </SsButton>
 
         <!-- Das Ergebnis steht neben seinem Ausloeser, nicht am Ende des
              Formulars. Dort stand es vorher: die Schaltflaeche sitzt in der
              festen Fusszeile, die Meldung im scrollbaren Rumpf — wer beim
              Passwortfeld auf „Verbindung testen" tippte, sah nichts
              geschehen. Am Geraet nachgestellt (E-33). -->
-        <p v-if="testResult" class="result" :class="{ ok: testResult.ok }">
-          {{ testResult.message }}
-        </p>
+        <SsFeedback class="result" :feedback="result.feedback.value" />
         <span class="spacer" />
-        <button class="secondary" @click="emit('cancel')">{{ t('common.cancel') }}</button>
-        <button class="primary" @click="save">{{ t('common.save') }}</button>
+        <SsButton variant="ghost" @click="emit('cancel')">{{ t('common.cancel') }}</SsButton>
+        <SsButton variant="primary" @click="save">{{ t('common.save') }}</SsButton>
       </footer>
     </div>
   </div>
@@ -814,48 +841,41 @@ function message(e: unknown): string {
 .backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.72);
+  background: var(--ss-dialog-scrim);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: var(--ss-space-3);
   z-index: 50;
 }
 
 .dialog {
   display: flex;
   flex-direction: column;
-  width: min(680px, 100%);
+  width: min(800px, 100%);
   max-height: 100%;
+  overflow: hidden;
   background: var(--ss-surface);
   border: 1px solid var(--ss-border);
-  border-radius: var(--ss-radius-card);
+  border-radius: var(--ss-radius-lg);
+  box-shadow: var(--ss-shadow-dialog);
 }
 
 .head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 24px;
+  padding: var(--ss-space-2) var(--ss-space-2) var(--ss-space-2) var(--ss-space-4);
   border-bottom: 1px solid var(--ss-border-soft);
 }
 
 .head .ss-wordmark {
-  font-size: 22px;
-}
-
-.close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--ss-touch-target);
-  height: var(--ss-touch-target);
-  border: 1px solid var(--ss-border-strong);
-  border-radius: var(--ss-radius-pill);
+  font-size: var(--ss-fs-xl);
+  font-weight: 400;
 }
 
 .body {
-  padding: 8px 24px 20px;
+  padding: var(--ss-space-1) var(--ss-space-4) var(--ss-space-3);
   flex-grow: 1;
   min-height: 0;
 }
@@ -868,18 +888,15 @@ function message(e: unknown): string {
      Zeile quetschte sich die Meldung am Geraet auf vier Zeilen in eine
      handbreite Spalte. */
   flex-wrap: wrap;
-  gap: 10px;
-  padding: 16px 24px;
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-2) var(--ss-space-3);
   border-top: 1px solid var(--ss-border-soft);
 }
 
-/* Die Schaltflaechen behalten ihre Breite, die Meldung daneben gibt nach.
-   Am Tablet brach sonst „Verbindung testen" auf zwei Zeilen um, sobald das
-   Ergebnis danebenstand — der Beschriftung sieht man einen Umbruch als
-   Versehen an, einem Fliesstext nicht. */
-.foot > button {
-  flex: 0 0 auto;
-  white-space: nowrap;
+/* Etwas mehr Abstand zwischen dem destruktiven Knopf und dem Rest, wie in der
+   Vorlage — der Finger soll dort nicht aus Versehen landen. */
+.foot .remove {
+  margin-right: var(--ss-space-1);
 }
 
 .spacer {
@@ -899,8 +916,8 @@ function message(e: unknown): string {
 }
 
 .fetch-status {
-  margin: 0 0 10px;
-  font-size: 14px;
+  margin: 0 0 var(--ss-space-1);
+  font-size: var(--ss-fs-m);
   color: var(--ss-text);
 }
 
@@ -913,34 +930,15 @@ function message(e: unknown): string {
 .fetch-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
-}
-
-.fetch-actions .link {
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 13px;
-  color: var(--ss-text-dim);
-  cursor: pointer;
+  gap: var(--ss-space-1);
 }
 
 .resync {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 10px;
-  font-size: 13px;
-}
-
-.resync .link {
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  color: var(--ss-text-dim);
-  cursor: pointer;
+  margin-top: 4px;
+  font-size: var(--ss-fs-m);
 }
 
 .resync .progress {
@@ -954,7 +952,7 @@ function message(e: unknown): string {
 
 .fetch-log .hint {
   margin: 0 0 8px;
-  font-size: 12px;
+  font-size: var(--ss-fs-s);
   color: var(--ss-text-dim);
 }
 
@@ -965,7 +963,7 @@ function message(e: unknown): string {
   /* Begrenzt, damit 50 Zeilen den Dialog nicht sprengen. */
   max-height: 220px;
   overflow-y: auto;
-  font-size: 12px;
+  font-size: var(--ss-fs-s);
 }
 
 .fetch-log li {
@@ -1009,10 +1007,10 @@ function message(e: unknown): string {
 .senders li {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--ss-surface-2, rgba(255, 255, 255, 0.03));
+  gap: 12px;
+  padding: 4px 4px 4px 12px;
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-accent);
 }
 
 /* Lange Adressen kuerzen statt umbrechen — die Zeile bleibt so hoch wie die
@@ -1027,35 +1025,19 @@ function message(e: unknown): string {
 
 .sender-count {
   flex: 0 0 auto;
-  font-size: 13px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
 }
 
+/* Ohne eigenen Rand: die Zeile ist schon die Fläche, ein Kreis darin wäre
+   doppelt gerahmt. */
 .sender-remove {
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--ss-text-dim);
-  cursor: pointer;
-}
-
-.sender-remove:hover:not(:disabled) {
-  color: var(--ss-error);
-}
-
-.sender-remove:disabled {
-  opacity: 0.4;
+  border-color: transparent;
 }
 
 .senders-empty {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
 }
 
@@ -1077,21 +1059,22 @@ function message(e: unknown): string {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 13px 16px;
+  padding: 14px var(--ss-space-2);
   border: 1px solid var(--ss-border);
-  border-radius: var(--ss-radius-nav);
+  border-radius: var(--ss-radius-md);
   cursor: pointer;
   min-height: var(--ss-touch-target);
 }
 
-.kind:has(input:checked) {
+/* Über eine Klasse statt `:has(input:checked)`: R-02 schliesst `:has()` aus,
+   auf alten WebViews blieb die gewählte Karte sonst unmarkiert. */
+.kind.checked {
   background: var(--ss-surface-accent);
   border-color: var(--ss-border-strong);
 }
 
 .kind input {
   margin-top: 3px;
-  accent-color: var(--ss-accent);
 }
 
 .kind-body {
@@ -1101,18 +1084,18 @@ function message(e: unknown): string {
 }
 
 .kind-title {
-  font-size: 15px;
+  font-size: var(--ss-fs-l);
   color: var(--ss-text-strong);
 }
 
 .kind-hint {
-  font-size: 13px;
+  font-size: var(--ss-fs-m);
   color: var(--ss-text-dim);
 }
 
 .album-row {
   display: flex;
-  gap: 10px;
+  gap: var(--ss-space-1);
 }
 
 .dimensions {
@@ -1126,68 +1109,23 @@ function message(e: unknown): string {
 }
 
 .narrow {
-  width: 110px;
+  width: 120px;
 }
 
-.primary,
-.secondary {
-  padding: 0 22px;
-  border-radius: var(--ss-radius-pill);
-  font-size: 15px;
-  font-weight: 500;
-  transition: background var(--ss-transition), color var(--ss-transition);
-}
-
-.primary {
-  background: var(--ss-accent);
-  color: var(--ss-bg);
-}
-
-.primary:active {
-  background: var(--ss-accent-hover);
-}
-
-.secondary {
-  border: 1px solid var(--ss-border-strong);
-  color: var(--ss-text-body);
-}
-
-.secondary:active:not(:disabled) {
-  background: var(--ss-surface-accent);
-  color: var(--ss-accent);
-}
-
-.secondary:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.danger {
-  padding: 0 18px;
-  border-radius: var(--ss-radius-pill);
+.error {
+  margin-top: var(--ss-space-2);
+  font-size: var(--ss-fs-m);
+  line-height: 1.45;
   color: var(--ss-error);
-  font-size: 15px;
 }
 
-.danger:active {
-  background: rgba(196, 102, 134, 0.12);
-}
-
-.error,
 /* Sitzt in der Fusszeile neben „Verbindung testen" (E-33). Die Grundbreite
    von 240 px ist die Schwelle: passt sie daneben, steht die Meldung dort;
    sonst rutscht sie auf eine eigene Zeile und bleibt lesbar, statt sich in
    eine schmale Spalte zu quetschen. Servermeldungen koennen lang werden. */
 .result {
   flex: 1 1 240px;
-  min-width: 0;
-  font-size: 14px;
-  line-height: 1.35;
-  color: var(--ss-error);
-}
-
-.result.ok {
-  color: var(--ss-accent);
+  margin-left: var(--ss-space-1);
 }
 
 /* Flache Ansichten — ein Smartphone im Querformat hat rund 390 px Höhe.
@@ -1203,7 +1141,7 @@ function message(e: unknown): string {
   }
 
   .head .ss-wordmark {
-    font-size: 18px;
+    font-size: var(--ss-fs-l);
   }
 
   .body {
