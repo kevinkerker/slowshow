@@ -2,7 +2,8 @@
 /**
  * Anlegen und Bearbeiten einer Quelle (FA-20, FA-21, FA-23, FA-29).
  *
- * Vier Quellenarten in einem Formular (E-30). Der Verbindungstest vor dem
+ * Vier Quellenarten in einem Formular (E-30), beim Anlegen in zwei Schritten:
+ * erst die Art, dann ihre Felder (E-66). Der Verbindungstest vor dem
  * Speichern ist bewusst prominent: eine Quelle, die erst beim nächtlichen Sync
  * scheitert, fällt auf einem unbeaufsichtigten Gerät niemandem auf. Beim
  * Postfach zählt das doppelt — dort merkt man einen Tippfehler sonst erst,
@@ -237,6 +238,13 @@ const formError = ref('')
 const safAvailable = ref(true)
 
 const isEdit = computed(() => props.source !== null)
+/**
+ * Schritt des Anlegens (E-66): erst die Quellenart, dann das Formular. Beim
+ * Bearbeiten steht der Dialog immer im Formular.
+ */
+const step = ref<'kind' | 'form'>('form')
+const pickingKind = computed(() => !isEdit.value && step.value === 'kind')
+const bodyEl = ref<HTMLElement | null>(null)
 const isRemote = computed(() => kind.value !== 'local' && kind.value !== 'mail')
 
 /** Auswahl der Quellenart. Die Beschriftungen folgen dem Schlüsselmuster. */
@@ -252,6 +260,7 @@ watch(
     password.value = ''
 
     if (!source) {
+      step.value = 'kind'
       kind.value = 'local'
       name.value = ''
       url.value = ''
@@ -268,6 +277,7 @@ watch(
       return
     }
 
+    step.value = 'form'
     kind.value = source.kind.type
     name.value = source.name
     subfolders.value = source.subfolders.join(', ')
@@ -301,6 +311,28 @@ watch(
   },
   { immediate: true },
 )
+
+/** Schritt 1 → 2: Art übernehmen und das Formular von oben zeigen (E-66). */
+function pickKind(option: Kind) {
+  kind.value = option
+  // Meldungen gehören zur vorigen Art — ein „Verbindung erfolgreich" für das
+  // NAS stünde sonst unter dem Postfach.
+  result.clear()
+  formError.value = ''
+  goTo('form')
+}
+
+/** Zurück zur Auswahl. Die Eingaben bleiben stehen, falls man zurückkehrt. */
+function changeKind() {
+  goTo('kind')
+}
+
+function goTo(next: 'kind' | 'form') {
+  step.value = next
+  // Der Rumpf bleibt dasselbe Element; ohne das stünde der neue Schritt
+  // mitten in der Scrollposition des alten.
+  if (bodyEl.value) bodyEl.value.scrollTop = 0
+}
 
 async function chooseFolder() {
   formError.value = ''
@@ -489,316 +521,338 @@ function message(e: unknown): string {
         </SsIconButton>
       </header>
 
-      <div class="body ss-scroll">
-        <!-- Quellenart. Beim Bearbeiten gesperrt: ein Wechsel würde die
-             zwischengespeicherten Bilder ungültig machen. -->
-        <fieldset v-if="!isEdit" class="kinds">
+      <div ref="bodyEl" class="body ss-scroll">
+        <!-- Schritt 1 beim Anlegen: nur die Quellenart (E-66). Ein Tipp fuehrt
+             direkt ins Formular. Vorher stand beides auf einer Seite; die vier
+             Karten fuellten den Schirm, und die Tester sahen nicht, dass
+             darunter das Formular begann. Beim Bearbeiten entfaellt der
+             Schritt: die Art ist dann gesperrt, ein Wechsel wuerde die
+             zwischengespeicherten Bilder ungueltig machen. -->
+        <fieldset v-if="pickingKind" class="kinds">
           <legend class="ss-label">{{ t('sourceForm.kind') }}</legend>
+          <!-- `click` statt `change`: wer zurueckgeht und dieselbe Art noch
+               einmal antippt, erwartet das Formular — ein `change` kaeme bei
+               einem schon gewaehlten Feld nicht. -->
           <label v-for="option in KINDS" :key="option" class="kind" :class="{ checked: kind === option }">
-            <input v-model="kind" type="radio" :value="option" />
+            <input type="radio" name="kind" :value="option" :checked="kind === option" @click="pickKind(option)" />
             <span class="kind-body">
               <span class="kind-title">{{ t(`sourceForm.kind_${option}`) }}</span>
               <span class="kind-hint">{{ t(`sourceForm.kind_${option}_hint`) }}</span>
             </span>
+            <svg class="kind-chevron" width="18" height="18" viewBox="0 0 20 20" fill="none"
+                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+              <path d="M8 4 L14 10 L8 16" />
+            </svg>
           </label>
         </fieldset>
 
-        <SettingRow :label="t('sourceForm.name')" stacked>
-          <input v-model="name" type="text" :placeholder="t('sourceForm.namePlaceholder')" />
-        </SettingRow>
-
-        <!-- Postfach (E-30). Ein Postfach je Rahmen: die Quellenliste laesst
-             kein zweites zu, weil das Papier genau eines vorsieht. -->
-        <template v-if="kind === 'mail'">
-          <!-- E-39: Die beiden Hinweise stehen dort, wo die Entscheidung
-               faellt — nicht in einer Anleitung, die niemand aufschlaegt. Sie
-               wirken an der Stelle, die bei einem Postfach wirklich zaehlt:
-               nicht wo der Schluessel liegt, sondern was ein gestohlenes
-               Passwort oeffnet. -->
-          <SettingRow
-            :label="t('sourceForm.mailHost')"
-            :hint="t('sourceForm.mailAccountHint')"
-            stacked
-          >
-            <input
-              v-model="mailHost"
-              type="text"
-              inputmode="url"
-              autocapitalize="off"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="imap.example.org"
-            />
-          </SettingRow>
-
-          <SettingRow :label="t('sourceForm.mailPort')">
-            <input v-model.number="mailPort" type="number" min="1" max="65535" class="narrow" />
-          </SettingRow>
-
-          <SettingRow :label="t('sourceForm.username')" stacked>
-            <input
-              v-model="username"
-              type="text"
-              inputmode="email"
-              autocapitalize="off"
-              autocomplete="username"
-              spellcheck="false"
-            />
-          </SettingRow>
-
-          <SettingRow
-            :label="t('sourceForm.password')"
-            :hint="isEdit ? t('sourceForm.passwordKeep') : t('sourceForm.mailPasswordHint')"
-            stacked
-          >
-            <input v-model="password" type="password" autocomplete="current-password" />
-          </SettingRow>
-
-          <SettingRow :label="t('sourceForm.mailFolder')" stacked>
-            <input
-              v-model="mailFolder"
-              type="text"
-              autocapitalize="off"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="INBOX"
-            />
-          </SettingRow>
-
-          <!-- Wartung F5–F7. Nur beim Bearbeiten: eine neue Quelle hat noch
-               keinen Abruf hinter sich. -->
-          <SettingRow v-if="isEdit" :label="t('sourceForm.fetchStatus')" stacked>
-            <div class="fetch-block">
-            <p class="fetch-status" :class="{ bad: lastFetch?.error }">
-              {{ fetchStatus }}
-            </p>
-            <div class="fetch-actions">
-              <SsButton variant="secondary" :busy="fetching" @click="fetchNow">
-                {{ fetching ? t('sourceForm.fetchRunning') : t('sourceForm.fetchNow') }}
-              </SsButton>
-              <SsButton variant="ghost" :aria-expanded="showLog" @click="showLog = !showLog">
-                {{ t('sourceForm.fetchLog') }}
-                <span aria-hidden="true">{{ showLog ? '▾' : '▸' }}</span>
-              </SsButton>
-            </div>
-
-            <!-- Wartung F8. Steht beim Abrufstand, weil es dieselbe Frage
-                 beantwortet — nur gruendlicher. -->
-            <div class="resync">
-              <SsButton
-                v-if="!resyncing"
-                variant="link"
-                :title="t('sourceForm.resyncHint')"
-                @click="startResync"
-              >
-                {{ t('sourceForm.resync') }}
-              </SsButton>
-              <template v-else>
-                <span class="progress">
-                  {{
-                    resyncProgress
-                      ? t('sourceForm.resyncRunning', {
-                          done: resyncProgress.done,
-                          total: resyncProgress.total,
-                          added: resyncProgress.added,
-                        })
-                      : t('sourceForm.fetchRunning')
-                  }}
-                </span>
-                <SsButton variant="ghost" @click="stopResync">
-                  {{ t('sourceForm.resyncCancel') }}
-                </SsButton>
-              </template>
-            </div>
-
-            <!-- Eingeklappt: 50 Zeilen sind im Normalfall Beiwerk und wuerden
-                 das Formular unbrauchbar lang machen. -->
-            <div v-if="showLog" class="fetch-log">
-              <p class="hint">{{ t('sourceForm.fetchLogHint') }}</p>
-              <p v-if="fetchEntries.length === 0" class="hint">
-                {{ t('sourceForm.fetchLogEmpty') }}
-              </p>
-              <ol v-else>
-                <li v-for="(e, i) in fetchEntries" :key="i" :class="{ bad: e.error }">
-                  <span class="when">{{ logTime(e) }}</span>
-                  <span class="trigger">{{ triggerLabel(e) }}</span>
-                  <span class="outcome">
-                    {{
-                      e.error
-                        ? e.error
-                        : t('sourceForm.fetchLogLine', {
-                            checked: e.checked,
-                            added: e.added,
-                            known: e.alreadyKnown,
-                          })
-                    }}
-                  </span>
-                </li>
-              </ol>
-            </div>
-            </div>
-          </SettingRow>
-
-          <!-- E-34. Steht bewusst direkt unter dem Ordner: der Hinweis
-               empfiehlt einen eigenen Ordner statt der INBOX, und das Feld
-               dafuer soll daneben liegen. -->
-          <SettingRow
-            :label="t('sourceForm.includeSeen')"
-            :hint="t('sourceForm.includeSeenHint')"
-          >
-            <ToggleSwitch v-model="includeSeen" :label="t('sourceForm.includeSeen')" />
-          </SettingRow>
-
-          <SettingRow :label="t('sourceForm.quarantineAll')" :hint="t('sourceForm.quarantineAllHint')">
-            <ToggleSwitch
-              v-model="quarantineAll"
-              :label="t('sourceForm.quarantineAll')"
-            />
-          </SettingRow>
-
-          <!-- Freigegebene Absender (F4, E-32). Nur beim Bearbeiten: eine
-               neue Quelle hat noch keine Liste. Ohne diesen Abschnitt war die
-               Freigabe eine Einbahnstrasse — ein einmal bestaetigter Absender
-               liess sich nie mehr zuruecknehmen. -->
-          <SettingRow
-            v-if="isEdit"
-            :label="t('sourceForm.allowedSenders')"
-            :hint="t('sourceForm.allowedSendersHint')"
-            stacked
-          >
-            <p v-if="senders.length === 0" class="senders-empty">
-              {{ t('sourceForm.allowedSendersEmpty') }}
-            </p>
-            <ul v-else class="senders">
-              <li v-for="entry in senders" :key="entry.address">
-                <span class="sender-address">{{ entry.address }}</span>
-                <span class="sender-count">
-                  {{ t('sourceForm.senderPhotos', { n: entry.photoCount }, entry.photoCount) }}
-                </span>
-                <SsIconButton
-                  class="sender-remove"
-                  :label="t('sourceForm.removeSender')"
-                  :busy="senderBusy === entry.address"
-                  @click="removeSender(entry)"
-                >
-                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none"
-                       stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                    <path d="M5 5 L15 15 M15 5 L5 15" />
-                  </svg>
-                </SsIconButton>
-              </li>
-            </ul>
-          </SettingRow>
-
-          <SettingRow :label="t('sourceForm.maxAttachment')">
-            <input v-model.number="maxAttachmentMb" type="number" min="1" max="200" class="narrow" />
-          </SettingRow>
-
-          <SettingRow :label="t('sourceForm.maxMailsPerHour')" :hint="t('sourceForm.maxMailsPerHourHint')">
-            <input v-model.number="maxMailsPerHour" type="number" min="0" max="500" class="narrow" />
-          </SettingRow>
-        </template>
-
-        <!-- Lokaler Ordner (FA-20) -->
-        <template v-else-if="kind === 'local'">
-          <SettingRow
-            :label="t('sourceForm.chooseFolder')"
-            :hint="safPath ? t('sourceForm.folderChosen', { path: safPath }) : undefined"
-          >
-            <SsButton variant="secondary" :disabled="!safAvailable" @click="chooseFolder">
-              {{ t('sourceForm.chooseFolder') }}
-            </SsButton>
-          </SettingRow>
-        </template>
-
-        <!-- WebDAV und Nextcloud (FA-21, FA-23) -->
+        <!-- Schritt 2: das Formular der gewaehlten Art (E-66). -->
         <template v-else>
-          <SettingRow :label="t('sourceForm.url')" stacked>
-            <input
-              v-model="url"
-              type="url"
-              inputmode="url"
-              autocapitalize="off"
-              autocomplete="off"
-              spellcheck="false"
-              :placeholder="kind === 'nextcloud' ? t('sourceForm.urlPlaceholderNextcloud') : t('sourceForm.urlPlaceholder')"
-            />
+          <div v-if="!isEdit" class="kind-chosen">
+            <span class="kind-body">
+              <span class="ss-label">{{ t('sourceForm.kind') }}</span>
+              <span class="kind-title">{{ t(`sourceForm.kind_${kind}`) }}</span>
+            </span>
+            <SsButton variant="link" @click="changeKind">{{ t('sourceForm.kindChange') }}</SsButton>
+          </div>
+
+          <SettingRow :label="t('sourceForm.name')" stacked>
+            <input v-model="name" type="text" :placeholder="t('sourceForm.namePlaceholder')" />
           </SettingRow>
 
-          <SettingRow :label="t('sourceForm.username')" stacked>
-            <input v-model="username" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" />
-          </SettingRow>
+          <!-- Postfach (E-30). Ein Postfach je Rahmen: die Quellenliste laesst
+               kein zweites zu, weil das Papier genau eines vorsieht. -->
+          <template v-if="kind === 'mail'">
+            <!-- E-39: Die beiden Hinweise stehen dort, wo die Entscheidung
+                 faellt — nicht in einer Anleitung, die niemand aufschlaegt. Sie
+                 wirken an der Stelle, die bei einem Postfach wirklich zaehlt:
+                 nicht wo der Schluessel liegt, sondern was ein gestohlenes
+                 Passwort oeffnet. -->
+            <SettingRow
+              :label="t('sourceForm.mailHost')"
+              :hint="t('sourceForm.mailAccountHint')"
+              stacked
+            >
+              <input
+                v-model="mailHost"
+                type="text"
+                inputmode="url"
+                autocapitalize="off"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="imap.example.org"
+              />
+            </SettingRow>
 
-          <SettingRow
-            :label="t('sourceForm.password')"
-            :hint="isEdit ? t('sourceForm.passwordKeep') : t('sourceForm.passwordHint')"
-            stacked
-          >
-            <input v-model="password" type="password" autocomplete="off" />
-          </SettingRow>
+            <SettingRow :label="t('sourceForm.mailPort')">
+              <input v-model.number="mailPort" type="number" min="1" max="65535" class="narrow" />
+            </SettingRow>
 
-          <template v-if="kind === 'nextcloud'">
-            <SettingRow :label="t('sourceForm.album')" stacked>
-              <div class="album-row">
-                <select v-model="album">
-                  <option v-if="album && !albums.some((a) => a.name === album)" :value="album">
-                    {{ album }}
-                  </option>
-                  <option v-for="a in albums" :key="a.name" :value="a.name">{{ a.name }}</option>
-                </select>
-                <SsButton variant="secondary" :busy="loadingAlbums" @click="loadAlbums">
-                  {{ loadingAlbums ? t('sourceForm.testing') : t('sourceForm.loadAlbums') }}
-                </SsButton>
-              </div>
+            <SettingRow :label="t('sourceForm.username')" stacked>
+              <input
+                v-model="username"
+                type="text"
+                inputmode="email"
+                autocapitalize="off"
+                autocomplete="username"
+                spellcheck="false"
+              />
             </SettingRow>
 
             <SettingRow
-              :label="t('sourceForm.usePreviewApi')"
-              :hint="t('sourceForm.usePreviewApiHint')"
+              :label="t('sourceForm.password')"
+              :hint="isEdit ? t('sourceForm.passwordKeep') : t('sourceForm.mailPasswordHint')"
+              stacked
             >
-              <ToggleSwitch v-model="usePreviewApi" :label="t('sourceForm.usePreviewApi')" />
+              <input v-model="password" type="password" autocomplete="current-password" />
+            </SettingRow>
+
+            <SettingRow :label="t('sourceForm.mailFolder')" stacked>
+              <input
+                v-model="mailFolder"
+                type="text"
+                autocapitalize="off"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="INBOX"
+              />
+            </SettingRow>
+
+            <!-- Wartung F5–F7. Nur beim Bearbeiten: eine neue Quelle hat noch
+                 keinen Abruf hinter sich. -->
+            <SettingRow v-if="isEdit" :label="t('sourceForm.fetchStatus')" stacked>
+              <div class="fetch-block">
+              <p class="fetch-status" :class="{ bad: lastFetch?.error }">
+                {{ fetchStatus }}
+              </p>
+              <div class="fetch-actions">
+                <SsButton variant="secondary" :busy="fetching" @click="fetchNow">
+                  {{ fetching ? t('sourceForm.fetchRunning') : t('sourceForm.fetchNow') }}
+                </SsButton>
+                <SsButton variant="ghost" :aria-expanded="showLog" @click="showLog = !showLog">
+                  {{ t('sourceForm.fetchLog') }}
+                  <span aria-hidden="true">{{ showLog ? '▾' : '▸' }}</span>
+                </SsButton>
+              </div>
+
+              <!-- Wartung F8. Steht beim Abrufstand, weil es dieselbe Frage
+                   beantwortet — nur gruendlicher. -->
+              <div class="resync">
+                <SsButton
+                  v-if="!resyncing"
+                  variant="link"
+                  :title="t('sourceForm.resyncHint')"
+                  @click="startResync"
+                >
+                  {{ t('sourceForm.resync') }}
+                </SsButton>
+                <template v-else>
+                  <span class="progress">
+                    {{
+                      resyncProgress
+                        ? t('sourceForm.resyncRunning', {
+                            done: resyncProgress.done,
+                            total: resyncProgress.total,
+                            added: resyncProgress.added,
+                          })
+                        : t('sourceForm.fetchRunning')
+                    }}
+                  </span>
+                  <SsButton variant="ghost" @click="stopResync">
+                    {{ t('sourceForm.resyncCancel') }}
+                  </SsButton>
+                </template>
+              </div>
+
+              <!-- Eingeklappt: 50 Zeilen sind im Normalfall Beiwerk und wuerden
+                   das Formular unbrauchbar lang machen. -->
+              <div v-if="showLog" class="fetch-log">
+                <p class="hint">{{ t('sourceForm.fetchLogHint') }}</p>
+                <p v-if="fetchEntries.length === 0" class="hint">
+                  {{ t('sourceForm.fetchLogEmpty') }}
+                </p>
+                <ol v-else>
+                  <li v-for="(e, i) in fetchEntries" :key="i" :class="{ bad: e.error }">
+                    <span class="when">{{ logTime(e) }}</span>
+                    <span class="trigger">{{ triggerLabel(e) }}</span>
+                    <span class="outcome">
+                      {{
+                        e.error
+                          ? e.error
+                          : t('sourceForm.fetchLogLine', {
+                              checked: e.checked,
+                              added: e.added,
+                              known: e.alreadyKnown,
+                            })
+                      }}
+                    </span>
+                  </li>
+                </ol>
+              </div>
+              </div>
+            </SettingRow>
+
+            <!-- E-34. Steht bewusst direkt unter dem Ordner: der Hinweis
+                 empfiehlt einen eigenen Ordner statt der INBOX, und das Feld
+                 dafuer soll daneben liegen. -->
+            <SettingRow
+              :label="t('sourceForm.includeSeen')"
+              :hint="t('sourceForm.includeSeenHint')"
+            >
+              <ToggleSwitch v-model="includeSeen" :label="t('sourceForm.includeSeen')" />
+            </SettingRow>
+
+            <SettingRow :label="t('sourceForm.quarantineAll')" :hint="t('sourceForm.quarantineAllHint')">
+              <ToggleSwitch
+                v-model="quarantineAll"
+                :label="t('sourceForm.quarantineAll')"
+              />
+            </SettingRow>
+
+            <!-- Freigegebene Absender (F4, E-32). Nur beim Bearbeiten: eine
+                 neue Quelle hat noch keine Liste. Ohne diesen Abschnitt war die
+                 Freigabe eine Einbahnstrasse — ein einmal bestaetigter Absender
+                 liess sich nie mehr zuruecknehmen. -->
+            <SettingRow
+              v-if="isEdit"
+              :label="t('sourceForm.allowedSenders')"
+              :hint="t('sourceForm.allowedSendersHint')"
+              stacked
+            >
+              <p v-if="senders.length === 0" class="senders-empty">
+                {{ t('sourceForm.allowedSendersEmpty') }}
+              </p>
+              <ul v-else class="senders">
+                <li v-for="entry in senders" :key="entry.address">
+                  <span class="sender-address">{{ entry.address }}</span>
+                  <span class="sender-count">
+                    {{ t('sourceForm.senderPhotos', { n: entry.photoCount }, entry.photoCount) }}
+                  </span>
+                  <SsIconButton
+                    class="sender-remove"
+                    :label="t('sourceForm.removeSender')"
+                    :busy="senderBusy === entry.address"
+                    @click="removeSender(entry)"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 20 20" fill="none"
+                         stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                      <path d="M5 5 L15 15 M15 5 L5 15" />
+                    </svg>
+                  </SsIconButton>
+                </li>
+              </ul>
+            </SettingRow>
+
+            <SettingRow :label="t('sourceForm.maxAttachment')">
+              <input v-model.number="maxAttachmentMb" type="number" min="1" max="200" class="narrow" />
+            </SettingRow>
+
+            <SettingRow :label="t('sourceForm.maxMailsPerHour')" :hint="t('sourceForm.maxMailsPerHourHint')">
+              <input v-model.number="maxMailsPerHour" type="number" min="0" max="500" class="narrow" />
             </SettingRow>
           </template>
 
-          <SettingRow
-            :label="t('sourceForm.allowInsecureTls')"
-            :hint="t('sourceForm.allowInsecureTlsHint')"
-          >
-            <ToggleSwitch v-model="allowInsecureTls" :label="t('sourceForm.allowInsecureTls')" />
+          <!-- Lokaler Ordner (FA-20) -->
+          <template v-else-if="kind === 'local'">
+            <SettingRow
+              :label="t('sourceForm.chooseFolder')"
+              :hint="safPath ? t('sourceForm.folderChosen', { path: safPath }) : undefined"
+            >
+              <SsButton variant="secondary" :disabled="!safAvailable" @click="chooseFolder">
+                {{ t('sourceForm.chooseFolder') }}
+              </SsButton>
+            </SettingRow>
+          </template>
+
+          <!-- WebDAV und Nextcloud (FA-21, FA-23) -->
+          <template v-else>
+            <SettingRow :label="t('sourceForm.url')" stacked>
+              <input
+                v-model="url"
+                type="url"
+                inputmode="url"
+                autocapitalize="off"
+                autocomplete="off"
+                spellcheck="false"
+                :placeholder="kind === 'nextcloud' ? t('sourceForm.urlPlaceholderNextcloud') : t('sourceForm.urlPlaceholder')"
+              />
+            </SettingRow>
+
+            <SettingRow :label="t('sourceForm.username')" stacked>
+              <input v-model="username" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" />
+            </SettingRow>
+
+            <SettingRow
+              :label="t('sourceForm.password')"
+              :hint="isEdit ? t('sourceForm.passwordKeep') : t('sourceForm.passwordHint')"
+              stacked
+            >
+              <input v-model="password" type="password" autocomplete="off" />
+            </SettingRow>
+
+            <template v-if="kind === 'nextcloud'">
+              <SettingRow :label="t('sourceForm.album')" stacked>
+                <div class="album-row">
+                  <select v-model="album">
+                    <option v-if="album && !albums.some((a) => a.name === album)" :value="album">
+                      {{ album }}
+                    </option>
+                    <option v-for="a in albums" :key="a.name" :value="a.name">{{ a.name }}</option>
+                  </select>
+                  <SsButton variant="secondary" :busy="loadingAlbums" @click="loadAlbums">
+                    {{ loadingAlbums ? t('sourceForm.testing') : t('sourceForm.loadAlbums') }}
+                  </SsButton>
+                </div>
+              </SettingRow>
+
+              <SettingRow
+                :label="t('sourceForm.usePreviewApi')"
+                :hint="t('sourceForm.usePreviewApiHint')"
+              >
+                <ToggleSwitch v-model="usePreviewApi" :label="t('sourceForm.usePreviewApi')" />
+              </SettingRow>
+            </template>
+
+            <SettingRow
+              :label="t('sourceForm.allowInsecureTls')"
+              :hint="t('sourceForm.allowInsecureTlsHint')"
+            >
+              <ToggleSwitch v-model="allowInsecureTls" :label="t('sourceForm.allowInsecureTls')" />
+            </SettingRow>
+          </template>
+
+          <!-- Abrufabstand: fuer jede Quelle ausser dem lokalen Ordner, der
+               beim Oeffnen ohnehin neu eingelesen wird. -->
+          <SettingRow v-if="kind !== 'local'" :label="t('sourceForm.syncInterval')">
+            <select v-model.number="syncIntervalMinutes" class="narrow">
+              <option :value="15">15 min</option>
+              <option :value="60">1 h</option>
+              <option :value="360">6 h</option>
+              <option :value="1440">24 h</option>
+            </select>
           </SettingRow>
+
+          <!-- Filter (FA-29) -->
+          <SettingRow
+            v-if="kind === 'local' || kind === 'webDav'"
+            :label="t('sourceForm.subfolders')"
+            :hint="t('sourceForm.subfoldersHint')"
+            stacked
+          >
+            <input v-model="subfolders" type="text" :placeholder="t('sourceForm.subfoldersPlaceholder')" />
+          </SettingRow>
+
+          <SettingRow :label="t('sourceForm.minResolution')" :hint="t('sourceForm.minResolutionHint')">
+            <div class="dimensions">
+              <input v-model.number="minWidth" type="number" min="0" step="16" class="narrow" />
+              <span class="times">×</span>
+              <input v-model.number="minHeight" type="number" min="0" step="16" class="narrow" />
+            </div>
+          </SettingRow>
+
+          <p v-if="formError" class="error">{{ formError }}</p>
+          <p v-if="props.saveError" class="error">{{ props.saveError }}</p>
         </template>
-
-        <!-- Abrufabstand: fuer jede Quelle ausser dem lokalen Ordner, der
-             beim Oeffnen ohnehin neu eingelesen wird. -->
-        <SettingRow v-if="kind !== 'local'" :label="t('sourceForm.syncInterval')">
-          <select v-model.number="syncIntervalMinutes" class="narrow">
-            <option :value="15">15 min</option>
-            <option :value="60">1 h</option>
-            <option :value="360">6 h</option>
-            <option :value="1440">24 h</option>
-          </select>
-        </SettingRow>
-
-        <!-- Filter (FA-29) -->
-        <SettingRow
-          v-if="kind === 'local' || kind === 'webDav'"
-          :label="t('sourceForm.subfolders')"
-          :hint="t('sourceForm.subfoldersHint')"
-          stacked
-        >
-          <input v-model="subfolders" type="text" :placeholder="t('sourceForm.subfoldersPlaceholder')" />
-        </SettingRow>
-
-        <SettingRow :label="t('sourceForm.minResolution')" :hint="t('sourceForm.minResolutionHint')">
-          <div class="dimensions">
-            <input v-model.number="minWidth" type="number" min="0" step="16" class="narrow" />
-            <span class="times">×</span>
-            <input v-model.number="minHeight" type="number" min="0" step="16" class="narrow" />
-          </div>
-        </SettingRow>
-
-        <p v-if="formError" class="error">{{ formError }}</p>
-        <p v-if="props.saveError" class="error">{{ props.saveError }}</p>
       </div>
 
       <footer class="foot">
@@ -815,7 +869,7 @@ function message(e: unknown): string {
           {{ t('sourceForm.removeSource') }}
         </SsButton>
         <SsButton
-          v-if="isRemote || kind === 'mail'"
+          v-if="!pickingKind && (isRemote || kind === 'mail')"
           variant="secondary"
           :busy="testing"
           @click="testConnection"
@@ -831,7 +885,8 @@ function message(e: unknown): string {
         <SsFeedback class="result" :feedback="result.feedback.value" />
         <span class="spacer" />
         <SsButton variant="ghost" @click="emit('cancel')">{{ t('common.cancel') }}</SsButton>
-        <SsButton variant="primary" @click="save">{{ t('common.save') }}</SsButton>
+        <!-- In Schritt 1 gibt es nichts zu speichern (E-66). -->
+        <SsButton v-if="!pickingKind" variant="primary" @click="save">{{ t('common.save') }}</SsButton>
       </footer>
     </div>
   </div>
@@ -1073,8 +1128,49 @@ function message(e: unknown): string {
   border-color: var(--ss-border-strong);
 }
 
+/* Das Radiofeld bleibt fuer Tastatur und Vorleser da, ist aber nicht zu
+   sehen: die Karte fuehrt weiter, der Pfeil sagt das (E-66). Ein Kreis zum
+   Ankreuzen versprach dagegen, dass danach noch etwas zu bestaetigen sei. */
+.kind {
+  position: relative;
+  align-items: center;
+}
+
 .kind input {
-  margin-top: 3px;
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.kind:focus-within {
+  outline: 2px solid var(--ss-accent);
+  outline-offset: 2px;
+}
+
+.kind-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.kind-chevron {
+  flex: 0 0 auto;
+  color: var(--ss-text-dim);
+}
+
+/* Schritt 2: die gewaehlte Art als ruhige Zeile ueber dem Formular, mit dem
+   Weg zurueck daneben (E-66). */
+.kind-chosen {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ss-space-2);
+  margin: 18px 0 8px;
+  padding: 12px var(--ss-space-2);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-accent);
 }
 
 .kind-body {
@@ -1157,6 +1253,11 @@ function message(e: unknown): string {
   }
 
   .kind {
+    padding: 8px 14px;
+  }
+
+  .kind-chosen {
+    margin: 10px 0 4px;
     padding: 8px 14px;
   }
 }

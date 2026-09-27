@@ -25,6 +25,16 @@ pub enum CacheError {
     Corrupt(#[from] serde_json::Error),
 }
 
+impl CacheError {
+    /// Ist der Speicher des Geraets voll (E-69)?
+    ///
+    /// Dann scheitert jede weitere Datei genauso; der Abgleich bricht ab,
+    /// statt jedes Bild erst zu dekodieren und dann nicht ablegen zu koennen.
+    pub fn is_storage_full(&self) -> bool {
+        matches!(self, Self::Io(e) if e.kind() == std::io::ErrorKind::StorageFull)
+    }
+}
+
 /// Kennzahlen für die Einstellungsoberfläche (Fußzeile des Design-Entwurfs).
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -470,6 +480,14 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn erkennt_vollen_speicher_e_69() {
+        let voll = CacheError::Io(std::io::Error::from(std::io::ErrorKind::StorageFull));
+        assert!(voll.is_storage_full());
+        let anderes = CacheError::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert!(!anderes.is_storage_full());
+    }
 
     /// Legt ein temporäres Cache-Verzeichnis an. Bewusst ohne `tempfile`-Crate,
     /// um die Abhängigkeitsliste klein zu halten (NF-10).

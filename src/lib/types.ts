@@ -398,6 +398,8 @@ export interface SyncReport {
   evicted: number
   truncated: boolean
   error: string | null
+  /** Grund des ersten Fehlschlags samt Schritt, etwa „Lesen: …". */
+  firstFailure: string | null
 }
 
 export interface Album {
@@ -414,7 +416,18 @@ export const EVENTS = {
   display: 'slowshow://display',
   config: 'slowshow://config',
   mqtt: 'slowshow://mqtt',
+  /** Neues Einzelbild eines Kamerastroms (E-67). */
+  liveFrame: 'slowshow://live-frame',
 } as const
+
+/**
+ * Nutzlast von `EVENTS.liveFrame` (E-67): nur Id und Nummer. Das Bild selbst
+ * holt die Bühne über das Asset-Protokoll (`stageUrl`), nie über IPC.
+ */
+export interface LiveFrame {
+  id: string
+  frame: number
+}
 
 /** Alle Bild-Ids eines Slides — für Prefetch und Overlays. */
 export function slideIds(slide: Slide | null): string[] {

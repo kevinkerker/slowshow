@@ -1,17 +1,16 @@
-//! Erstes Bild aus einem MJPEG-Strom (E-55).
+//! Teilbilder aus einem MJPEG-Strom (E-55, E-67).
 //!
 //! Home Assistant liefert Kameras als `multipart/x-mixed-replace`: ein Teil
 //! nach dem anderen, jeder mit eigenen Kopfzeilen und einem JPEG als Inhalt,
-//! ohne Ende. Ein Bilderrahmen zeigt kein Video — er nimmt das **erste
-//! vollstaendige Bild** und haengt es wie jedes andere Fremdbild an die Wand
-//! (E-52). Genau das versucht Home Assistant, wenn jemand im Kamera-Dialog
-//! „Auf Media-Player abspielen" waehlt; vorher wies der Rahmen den Strom als
-//! „kein Bild" ab, und weil das Stop davor schon durch war, blieb er im
-//! Nachtmodus.
+//! ohne Ende. Das **erste vollstaendige Bild** haengt der Rahmen wie jedes
+//! andere Fremdbild an die Wand (E-52, E-55); danach liest [`FrameReader`]
+//! weiter und reicht jeweils das neueste Bild nach — das Livebild (E-67).
+//! Genau das versucht Home Assistant, wenn jemand im Kamera-Dialog „Auf
+//! Media-Player abspielen" waehlt.
 //!
 //! Reine Rechenlogik ueber einem Pufferstand: der Aufrufer liest Stueck fuer
-//! Stueck vom Netz und fragt nach jedem Stueck, ob das erste Bild schon da
-//! ist. So laesst sich jeder Zwischenstand ohne Netz pruefen.
+//! Stueck vom Netz und fragt nach jedem Stueck, ob ein Bild fertig ist. So
+//! laesst sich jeder Zwischenstand ohne Netz pruefen.
 //!
 //! Tolerant, weil Home Assistant den Trenner nicht nach RFC 2046 schreibt: im
 //! Kopf steht `boundary=--frameboundary`, im Rumpf dann `--frameboundary` —
@@ -123,22 +122,46 @@ fn header_value<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
 /// viele Bytes nach den Kopfzeilen da sind; ohne Laenge endet er am naechsten
 /// Trenner. Teile, die nichts Bildhaftes ankuendigen, gelten als ungeeignet.
 pub fn first_part(buf: &[u8], boundary: Option<&str>) -> Part {
+    match parse(buf, boundary) {
+        Parsed::Complete {
+            content_type, body, ..
+        } => Part::Complete { content_type, body },
+        Parsed::Incomplete => Part::Incomplete,
+        Parsed::Invalid(why) => Part::Invalid(why),
+    }
+}
+
+/// Wie [`Part`], mit dem, was der [`FrameReader`] zum Weiterlesen braucht.
+enum Parsed {
+    Complete {
+        content_type: Option<String>,
+        body: Vec<u8>,
+        /// Index hinter dem Teil — ab hier beginnt der naechste.
+        end: usize,
+        /// Der tatsaechlich benutzte Trenner, auch wenn er geraten war.
+        needle: Vec<u8>,
+    },
+    Incomplete,
+    Invalid(String),
+}
+
+fn parse(buf: &[u8], boundary: Option<&str>) -> Parsed {
     // 1. Trenner finden und die Zeile dahinter ueberlesen.
     let (delim_at, needle) = match boundary {
         Some(b) => {
             let needle = needle_for(b);
             match find(buf, &needle, 0) {
                 Some(at) => (at, needle),
-                None => return Part::Incomplete,
+                None => return Parsed::Incomplete,
             }
         }
         None => match guess_needle(buf) {
             Some(found) => found,
-            None => return Part::Incomplete,
+            None => return Parsed::Incomplete,
         },
     };
     let Some(headers_at) = after_line_end(buf, delim_at) else {
-        return Part::Incomplete;
+        return Parsed::Incomplete;
     };
 
     // 2. Kopfzeilen bis zur Leerzeile.
@@ -146,7 +169,7 @@ pub fn first_part(buf: &[u8], boundary: Option<&str>) -> Part {
         Some(p) => (p, p + 4),
         None => match find(buf, b"\n\n", headers_at) {
             Some(p) => (p, p + 2),
-            None => return Part::Incomplete,
+            None => return Parsed::Incomplete,
         },
     };
     let headers = String::from_utf8_lossy(&buf[headers_at..headers_end]);
@@ -154,19 +177,19 @@ pub fn first_part(buf: &[u8], boundary: Option<&str>) -> Part {
     if let Some(ct) = &content_type {
         let ct = ct.to_ascii_lowercase();
         if !(ct.starts_with("image/") || ct.starts_with("application/octet-stream")) {
-            return Part::Invalid(format!("Teil ist kein Bild: {ct}"));
+            return Parsed::Invalid(format!("Teil ist kein Bild: {ct}"));
         }
     }
 
     // 3. Rumpf: nach Laenge oder bis zum naechsten Trenner.
-    let body = match header_value(&headers, "content-length").map(str::parse::<usize>) {
+    let (body, end) = match header_value(&headers, "content-length").map(str::parse::<usize>) {
         Some(Ok(len)) => {
             if buf.len() < body_at + len {
-                return Part::Incomplete;
+                return Parsed::Incomplete;
             }
-            buf[body_at..body_at + len].to_vec()
+            (buf[body_at..body_at + len].to_vec(), body_at + len)
         }
-        Some(Err(_)) => return Part::Invalid("Content-Length unlesbar".into()),
+        Some(Err(_)) => return Parsed::Invalid("Content-Length unlesbar".into()),
         None => match find(buf, &needle, body_at) {
             Some(next) => {
                 let mut end = next;
@@ -175,15 +198,75 @@ pub fn first_part(buf: &[u8], boundary: Option<&str>) -> Part {
                 while end > body_at && matches!(buf[end - 1], b'\r' | b'\n' | b'-') {
                     end -= 1;
                 }
-                buf[body_at..end].to_vec()
+                // Weiter geht es *am* Trenner, nicht dahinter: er leitet den
+                // naechsten Teil ein.
+                (buf[body_at..end].to_vec(), next)
             }
-            None => return Part::Incomplete,
+            None => return Parsed::Incomplete,
         },
     };
     if body.is_empty() {
-        return Part::Invalid("leerer Teil".into());
+        return Parsed::Invalid("leerer Teil".into());
     }
-    Part::Complete { content_type, body }
+    Parsed::Complete {
+        content_type,
+        body,
+        end,
+        needle,
+    }
+}
+
+/// Liest einen Strom fortlaufend und liefert jeweils das neueste Bild (E-67).
+///
+/// Aeltere Bilder, die im selben Netzstueck mitkamen, fallen weg: ein Livebild
+/// soll zeigen, was *jetzt* vor der Kamera ist, nicht aufholen, was der Rahmen
+/// waehrend des Dekodierens verpasst hat. Der Puffer behaelt nur den
+/// angefangenen Rest und waechst deshalb nicht mit der Laufzeit.
+pub struct FrameReader {
+    buf: Vec<u8>,
+    /// Der Trenner, wie er im Rumpf gesucht wird. Nach dem ersten Teil steht
+    /// er fest, auch wenn er anfangs geraten werden musste.
+    boundary: Option<String>,
+}
+
+impl FrameReader {
+    pub fn new(boundary: Option<String>) -> Self {
+        Self {
+            buf: Vec::new(),
+            boundary,
+        }
+    }
+
+    /// Haengt ein Netzstueck an.
+    pub fn push(&mut self, chunk: &[u8]) {
+        self.buf.extend_from_slice(chunk);
+    }
+
+    /// Wie viele Bytes auf den Rest eines angefangenen Teils warten.
+    pub fn pending(&self) -> usize {
+        self.buf.len()
+    }
+
+    /// Das neueste vollstaendige Bild seit dem letzten Aufruf, falls eines
+    /// fertig wurde. `Err`, wenn der Strom nichts Bildhaftes mehr liefert.
+    pub fn latest(&mut self) -> Result<Option<Vec<u8>>, String> {
+        let mut newest = None;
+        loop {
+            match parse(&self.buf, self.boundary.as_deref()) {
+                Parsed::Complete {
+                    body, end, needle, ..
+                } => {
+                    if self.boundary.is_none() {
+                        self.boundary = Some(String::from_utf8_lossy(&needle).into_owned());
+                    }
+                    self.buf.drain(..end);
+                    newest = Some(body);
+                }
+                Parsed::Incomplete => return Ok(newest),
+                Parsed::Invalid(why) => return Err(why),
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -339,6 +422,67 @@ mod tests {
                 body: JPEG.to_vec(),
             }
         );
+    }
+
+    // ── Fortlaufendes Lesen (E-67) ──────────────────────────────────────────
+
+    #[test]
+    fn liefert_bild_fuer_bild_in_netzstuecken_e_67() {
+        let mut reader = FrameReader::new(Some("--frameboundary".into()));
+        let erstes = ha_part(&[0xFF, 0xD8, 1, 0xFF, 0xD9]);
+        let zweites = ha_part(&[0xFF, 0xD8, 2, 0xFF, 0xD9]);
+
+        // Das erste Bild in zwei Haelften: vor der zweiten gibt es nichts.
+        let (a, b) = erstes.split_at(erstes.len() / 2);
+        reader.push(a);
+        assert_eq!(reader.latest(), Ok(None));
+        reader.push(b);
+        assert_eq!(reader.latest(), Ok(Some(vec![0xFF, 0xD8, 1, 0xFF, 0xD9])));
+
+        reader.push(&zweites);
+        assert_eq!(reader.latest(), Ok(Some(vec![0xFF, 0xD8, 2, 0xFF, 0xD9])));
+        assert_eq!(reader.latest(), Ok(None), "kein Bild doppelt");
+    }
+
+    #[test]
+    fn ueberspringt_aeltere_bilder_aus_demselben_stueck_e_67() {
+        // Waehrend der Rahmen dekodiert, laeuft der Strom weiter. Aufholen
+        // hiesse: das Livebild zeigt die Vergangenheit.
+        let mut reader = FrameReader::new(Some("--frameboundary".into()));
+        let mut stueck = Vec::new();
+        for n in 1..=3u8 {
+            stueck.extend(ha_part(&[0xFF, 0xD8, n, 0xFF, 0xD9]));
+        }
+        stueck.extend_from_slice(b"--frameboundary\r\nContent-Type: image/jp");
+        reader.push(&stueck);
+        assert_eq!(reader.latest(), Ok(Some(vec![0xFF, 0xD8, 3, 0xFF, 0xD9])));
+        // Nur der angefangene vierte Teil bleibt im Puffer.
+        assert!(
+            reader.pending() < 45,
+            "Puffer waechst: {}",
+            reader.pending()
+        );
+    }
+
+    #[test]
+    fn liest_teile_ohne_laenge_fortlaufend_e_67() {
+        // Ohne Content-Length endet ein Teil am naechsten Trenner — und der
+        // gehoert dann schon zum naechsten Teil, darf also nicht verschluckt
+        // werden. Ohne Trenner im Kopf wird er geraten und danach behalten.
+        let mut reader = FrameReader::new(None);
+        reader.push(b"--abc\r\nContent-Type: image/jpeg\r\n\r\n\xFF\xD8\x01\xFF\xD9\r\n");
+        assert_eq!(reader.latest(), Ok(None));
+        reader.push(b"--abc\r\nContent-Type: image/jpeg\r\n\r\n\xFF\xD8\x02\xFF\xD9\r\n");
+        assert_eq!(reader.latest(), Ok(Some(vec![0xFF, 0xD8, 1, 0xFF, 0xD9])));
+        reader.push(b"--abc\r\n");
+        assert_eq!(reader.latest(), Ok(Some(vec![0xFF, 0xD8, 2, 0xFF, 0xD9])));
+    }
+
+    #[test]
+    fn meldet_einen_strom_der_kein_bild_mehr_liefert_e_67() {
+        let mut reader = FrameReader::new(Some("abc".into()));
+        reader.push(b"--abc\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhallo\r\n");
+        assert!(reader.latest().is_err());
     }
 
     #[test]

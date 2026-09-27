@@ -216,6 +216,7 @@ onBeforeUnmount(() => {
       :transition-enabled="cfg.transition.enabled"
       :transition-ms="cfg.transition.durationMs"
       :ken-burns="cfg.kenBurns"
+      :live-frame="show.liveFrame"
     />
 
     <!-- Verlauf für die Lesbarkeit der Einblendungen. Nur dort, wo etwas

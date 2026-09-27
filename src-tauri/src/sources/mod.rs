@@ -202,19 +202,26 @@ impl RemoteClient {
         Ok(result)
     }
 
+    /// Muss die Laenge des Geladenen mit der Auflistung uebereinstimmen?
+    ///
+    /// Nur bei einer Netzuebertragung des Originals: dort bricht ein Download
+    /// tatsaechlich ab (E-45). Nextcloud holt bevorzugt eine Vorschau in
+    /// Zielgroesse (E-03) — deren Laenge ist eine andere. Ein lokaler Ordner
+    /// kann nicht halb uebertragen werden; dort machte eine falsche Groesse
+    /// des Dateianbieters aus lesbaren Bildern einen Totalausfall, gemessen
+    /// am Emulator mit 295 von 300 (E-69). Der Decoder bleibt die Pruefung.
+    pub fn checks_transfer_length(&self) -> bool {
+        match self {
+            Self::Local(_) => false,
+            Self::WebDav(_) => true,
+            Self::Nextcloud(c) => !c.uses_preview_api(),
+        }
+    }
+
     /// Lädt eine Datei.
     ///
     /// Nextcloud nutzt dabei die Preview-API (E-03), WebDAV lädt das Original,
     /// lokale Ordner lesen über SAF.
-    /// Liefert `fetch` die Originaldatei, sodass ihre Laenge mit der
-    /// Auflistung uebereinstimmen muss? Nextcloud holt bevorzugt eine
-    /// Vorschau in Zielgroesse (E-03) — deren Laenge ist eine andere.
-    pub fn delivers_original(&self) -> bool {
-        match self {
-            Self::Local(_) | Self::WebDav(_) => true,
-            Self::Nextcloud(c) => !c.uses_preview_api(),
-        }
-    }
 
     pub async fn fetch(
         &self,
@@ -331,6 +338,13 @@ mod tests {
             .dav()
             .base_url()
             .contains("/remote.php/dav/photos/kevin/albums/Sommer%202026"));
+    }
+
+    #[test]
+    fn laenge_wird_nur_bei_netzuebertragungen_geprueft_e_69() {
+        assert!(!RemoteClient::Local(LocalClient).checks_transfer_length());
+        let dav = WebDavClient::new("https://nas.local/Fotos", "u", "p", false).unwrap();
+        assert!(RemoteClient::WebDav(dav).checks_transfer_length());
     }
 
     #[test]

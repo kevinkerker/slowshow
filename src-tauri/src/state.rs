@@ -14,7 +14,7 @@ use crate::playlist::{build_order, Playlist, Slide};
 use crate::schedule::{self, DisplayState};
 use crate::scheduler::{Scheduler, SystemRandom};
 use crate::secrets::{FileKeyProvider, SecretStore};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -45,6 +45,16 @@ pub mod events {
     pub const CONFIG: &str = "slowshow://config";
     /// Die MQTT-Verbindung hat ihren Zustand gewechselt.
     pub const MQTT: &str = "slowshow://mqtt";
+    /// Ein Kamerastrom hat ein neues Einzelbild (E-67). Traegt nur Id und
+    /// Nummer; das Bild selbst holt die Oberflaeche ueber das Asset-Protokoll.
+    pub const LIVE_FRAME: &str = "slowshow://live-frame";
+}
+
+/// Nutzlast von [`events::LIVE_FRAME`].
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LiveFrame {
+    pub id: String,
+    pub frame: u32,
 }
 
 pub struct AppState {
@@ -88,6 +98,11 @@ pub struct AppState {
     /// `acquire` reiht der Reihe nach ein, statt abzuweisen. Damit ist die
     /// Warteschlange genau diese Wartezeile.
     sync_slots: Arc<Semaphore>,
+    /// Letzter Abgleichsbericht je Quelle, fuer den Diagnosebericht.
+    ///
+    /// Nur im Speicher: gefragt ist er direkt nach dem Lauf, der schiefging —
+    /// ein Tester gleicht ab und erzeugt dann den Bericht.
+    last_syncs: Mutex<HashMap<String, crate::sync::SyncReport>>,
     /// Abbruchwunsch für den laufenden Neuabgleich (Wartung F8).
     ///
     /// Ein Neuabgleich über ein volles Postfach läuft Minuten. Ohne Abbruch
@@ -174,10 +189,14 @@ pub struct External {
     pub id: String,
     pub title: String,
     pub uri: String,
-    /// Fertig aufbereitetes JPEG in Displaygroesse (NF-12).
+    /// Fertig aufbereitetes JPEG in Displaygroesse (NF-12). Bei einem
+    /// Kamerastrom das neueste Einzelbild (E-67).
     pub jpeg: Vec<u8>,
     /// Haengt es gerade? Vorher ist es nur vorgemerkt.
     pub showing: bool,
+    /// Wie oft das Bild seit dem Vormerken ersetzt wurde — beim Livebild die
+    /// Nummer des Einzelbilds (E-67), sonst 0.
+    pub frame: u32,
     staged_at: Instant,
 }
 
@@ -223,6 +242,7 @@ impl AppState {
             external_seq: AtomicU32::new(0),
             sync_claimed: Mutex::new(HashSet::new()),
             sync_slots: Arc::new(Semaphore::new(MAX_PARALLEL_SOURCES)),
+            last_syncs: Mutex::new(HashMap::new()),
             resync_cancel: AtomicBool::new(false),
         };
         state.rebuild_playlist();
@@ -323,7 +343,10 @@ impl AppState {
     /// Dekodiert und skaliert hier im Rust-Prozess auf Displaygroesse (NF-12,
     /// NF-13): die WebView bekommt, wie bei jedem Cache-Bild, ein fertiges
     /// JPEG. Ein bereits haengendes Fremdbild wird dabei ersetzt.
-    pub fn stage_external(&self, bytes: &[u8], title: &str, uri: &str) -> Result<(), String> {
+    ///
+    /// Gibt die Id zurueck: ein Kamerastrom reicht darunter seine weiteren
+    /// Einzelbilder nach (E-67).
+    pub fn stage_external(&self, bytes: &[u8], title: &str, uri: &str) -> Result<String, String> {
         self.stage_external_at(bytes, title, uri, Instant::now())
     }
 
@@ -333,7 +356,7 @@ impl AppState {
         title: &str,
         uri: &str,
         staged_at: Instant,
-    ) -> Result<(), String> {
+    ) -> Result<String, String> {
         let cache = self.effective_cache_config();
         let prepared = crate::decode::prepare(
             bytes,
@@ -345,18 +368,78 @@ impl AppState {
         )
         .map_err(|e| e.to_string())?;
         let seq = self.external_seq.fetch_add(1, Ordering::Relaxed) + 1;
+        let id = format!("{EXTERNAL_PREFIX}{seq}");
         let external = External {
-            id: format!("{EXTERNAL_PREFIX}{seq}"),
+            id: id.clone(),
             title: title.to_string(),
             uri: uri.to_string(),
             jpeg: prepared.bytes,
             showing: false,
+            frame: 0,
             staged_at,
         };
         if let Ok(mut slot) = self.external.lock() {
             *slot = Some(external);
         }
-        Ok(())
+        Ok(id)
+    }
+
+    /// Ist das Fremdbild mit dieser Id noch da, vorgemerkt oder haengend?
+    ///
+    /// Ein Kamerastrom fragt das, bevor er weiterliest (E-67): Stop, eine
+    /// Geste, der Nachtmodus oder ein neues `play_media` haben es sonst
+    /// laengst abgeraeumt, und jedes weitere Einzelbild waere verschwendet.
+    pub fn external_alive(&self, id: &str) -> bool {
+        self.external
+            .lock()
+            .map(|slot| slot.as_ref().is_some_and(|e| e.id == id))
+            .unwrap_or(false)
+    }
+
+    /// Ersetzt das Bild eines laufenden Kamerastroms durch sein neuestes
+    /// Einzelbild (E-67).
+    ///
+    /// `Ok(Some(n))` mit der Nummer des Einzelbilds, wenn es haengt — dann
+    /// muss die Oberflaeche nachladen. `Ok(None)`, wenn es nur vorgemerkt ist
+    /// (das Bild ist trotzdem ersetzt, `Play` zeigt dann das frischeste) oder
+    /// wenn es die Id nicht mehr gibt; Letzteres sagt [`Self::external_alive`].
+    /// Dekodiert wird ausserhalb der Sperre: das Asset-Protokoll liest
+    /// derweil das vorige Bild.
+    pub fn update_external_frame(&self, id: &str, bytes: &[u8]) -> Result<Option<u32>, String> {
+        if !self.external_alive(id) {
+            return Ok(None);
+        }
+        let cache = self.effective_cache_config();
+        let jpeg = crate::decode::live_frame(
+            bytes,
+            cache.target_width,
+            cache.target_height,
+            cache.jpeg_quality,
+        )
+        .map_err(|e| e.to_string())?;
+        let mut slot = self.external.lock().map_err(|e| e.to_string())?;
+        let Some(external) = slot.as_mut().filter(|e| e.id == id) else {
+            return Ok(None);
+        };
+        external.jpeg = jpeg;
+        external.frame += 1;
+        Ok(external.showing.then_some(external.frame))
+    }
+
+    /// Raeumt das Fremdbild ab, aber nur, wenn es noch dieses ist (E-67).
+    ///
+    /// Ein Kamerastrom, der an sein Zeitlimit kommt oder abreisst, darf kein
+    /// Bild abraeumen, das inzwischen an seine Stelle getreten ist.
+    /// `true`, wenn es **hing**.
+    pub fn end_external_if(&self, id: &str) -> bool {
+        let Ok(mut slot) = self.external.lock() else {
+            return false;
+        };
+        if slot.as_ref().is_some_and(|e| e.id == id) {
+            slot.take().map(|e| e.showing).unwrap_or(false)
+        } else {
+            false
+        }
     }
 
     /// Zeigt das vorgemerkte Fremdbild. `None`, wenn keines wartet oder das
@@ -465,6 +548,21 @@ impl AppState {
         if let Ok(mut claimed) = self.sync_claimed.lock() {
             claimed.remove(id);
         }
+    }
+
+    /// Merkt sich den Bericht eines Abgleichs; ein neuer ersetzt den alten.
+    pub fn remember_sync(&self, report: &crate::sync::SyncReport) {
+        if let Ok(mut last) = self.last_syncs.lock() {
+            last.insert(report.source_id.clone(), report.clone());
+        }
+    }
+
+    /// Die zuletzt gemerkten Abgleichsberichte, nach Quelle.
+    pub fn last_syncs(&self) -> HashMap<String, crate::sync::SyncReport> {
+        self.last_syncs
+            .lock()
+            .map(|l| l.clone())
+            .unwrap_or_default()
     }
 
     /// Die Warteschlange der Abgleiche (E-43).
@@ -1508,6 +1606,23 @@ mod tests {
     }
 
     #[test]
+    fn letzter_abgleich_ersetzt_den_vorigen_je_quelle() {
+        let dir = TempDir::new("lastsync");
+        let state = AppState::new(&dir.0).unwrap();
+
+        let mut alt = crate::sync::SyncReport::for_source("a");
+        alt.fail("Lesen", "weg");
+        state.remember_sync(&alt);
+        state.remember_sync(&crate::sync::SyncReport::for_source("b"));
+        state.remember_sync(&crate::sync::SyncReport::for_source("a"));
+
+        let last = state.last_syncs();
+        assert_eq!(last.len(), 2);
+        assert_eq!(last["a"].failed, 0, "der neue Lauf gilt, nicht der alte");
+        assert!(last["a"].first_failure.is_none());
+    }
+
+    #[test]
     fn nur_zwei_quellen_gleichzeitig_e_43() {
         // Der Semaphor ist die Warteschlange: die dritte Quelle wartet, statt
         // abgewiesen zu werden. Mehr als zwei gleichzeitig hiesse mehr als zwei
@@ -1545,7 +1660,13 @@ mod tests {
     /// ausschliesst — der Zeitplan rechnet mit der echten Uhr.
     fn fenster(enthaelt_jetzt: bool) -> (String, String) {
         let jetzt = schedule::now_local_minutes() as i64;
-        let hm = |m: i64| format!("{:02}:{:02}", m.rem_euclid(1440) / 60, m.rem_euclid(1440) % 60);
+        let hm = |m: i64| {
+            format!(
+                "{:02}:{:02}",
+                m.rem_euclid(1440) / 60,
+                m.rem_euclid(1440) % 60
+            )
+        };
         if enthaelt_jetzt {
             (hm(jetzt - 2), hm(jetzt + 3))
         } else {
@@ -1784,6 +1905,95 @@ mod tests {
             .stage_external(b"kein bild", "x", "http://ha/x")
             .is_err());
         assert!(state.show_external().is_none());
+    }
+
+    // ── Livebild (E-67) ─────────────────────────────────────────────────────
+
+    #[test]
+    fn livebild_ersetzt_das_bild_und_zaehlt_mit_e_67() {
+        let dir = TempDir::new("live-frames");
+        let state = AppState::new(&dir.0).unwrap();
+        let id = state
+            .stage_external(&test_jpeg(8, 6), "Tuer", "http://ha/strom")
+            .unwrap();
+
+        // Vorgemerkt: ersetzt, aber nichts nachzuladen — Play zeigt dann das
+        // frischeste Bild.
+        assert_eq!(
+            state.update_external_frame(&id, &test_jpeg(10, 6)),
+            Ok(None)
+        );
+        state.show_external().unwrap();
+        let bild = image::load_from_memory(&state.read_external(&id).unwrap()).unwrap();
+        assert_eq!(bild.width(), 10, "das Einzelbild von vorhin haengt");
+
+        assert_eq!(
+            state.update_external_frame(&id, &test_jpeg(12, 6)),
+            Ok(Some(2))
+        );
+        let bild = image::load_from_memory(&state.read_external(&id).unwrap()).unwrap();
+        assert_eq!(bild.width(), 12);
+        // Id und Slide bleiben: die Oberflaeche blendet nicht um, sie laedt nach.
+        assert_eq!(
+            state.current_slide(),
+            Some(Slide::Single { id: id.clone() })
+        );
+    }
+
+    #[test]
+    fn livebild_eines_abgeraeumten_stroms_wird_verworfen_e_67() {
+        let dir = TempDir::new("live-gone");
+        let state = AppState::new(&dir.0).unwrap();
+        let alt = state
+            .stage_external(&test_jpeg(8, 6), "alt", "http://ha/a")
+            .unwrap();
+        // Ein neues play_media verdraengt den laufenden Strom.
+        let neu = state
+            .stage_external(&test_jpeg(8, 6), "neu", "http://ha/b")
+            .unwrap();
+        assert!(!state.external_alive(&alt));
+        assert!(state.external_alive(&neu));
+
+        assert_eq!(
+            state.update_external_frame(&alt, &test_jpeg(20, 6)),
+            Ok(None)
+        );
+        state.show_external().unwrap();
+        let bild = image::load_from_memory(&state.read_external(&neu).unwrap()).unwrap();
+        assert_eq!(bild.width(), 8, "das neue Bild blieb unberuehrt");
+    }
+
+    #[test]
+    fn livebild_endet_nur_fuer_den_eigenen_strom_e_67() {
+        // Laeuft das Zeitlimit des alten Stroms ab, darf es nicht das Bild
+        // abraeumen, das inzwischen an seiner Stelle haengt.
+        let dir = TempDir::new("live-end");
+        let state = AppState::new(&dir.0).unwrap();
+        let alt = state
+            .stage_external(&test_jpeg(8, 6), "alt", "http://ha/a")
+            .unwrap();
+        let neu = state
+            .stage_external(&test_jpeg(8, 6), "neu", "http://ha/b")
+            .unwrap();
+        state.show_external().unwrap();
+
+        assert!(!state.end_external_if(&alt));
+        assert!(state.external_alive(&neu));
+        assert!(state.end_external_if(&neu), "es hing");
+        assert!(!state.external_alive(&neu));
+    }
+
+    #[test]
+    fn kaputtes_einzelbild_laesst_das_vorige_haengen_e_67() {
+        let dir = TempDir::new("live-bad");
+        let state = AppState::new(&dir.0).unwrap();
+        let id = state
+            .stage_external(&test_jpeg(8, 6), "Tuer", "http://ha/strom")
+            .unwrap();
+        state.show_external().unwrap();
+        assert!(state.update_external_frame(&id, b"kaputt").is_err());
+        assert!(state.read_external(&id).is_some());
+        assert!(state.external_alive(&id));
     }
 
     #[test]

@@ -15,7 +15,8 @@
 //! | Next / Previous     | Bildwechsel (FA-41), beendet ein Fremdbild            |
 //! | Volume 0–100        | Helligkeit 1–100 % (FA-53), holt die Regelung zurueck |
 //! |                     | (E-48)                                                |
-//! | SetAVTransportURI   | Fremdbild laden (E-52)                                |
+//! | SetAVTransportURI   | Fremdbild laden (E-52); ein Kamerastrom laeuft als    |
+//! |                     | Livebild weiter, hoechstens zwei Minuten (E-67)       |
 //! | Titel / Albumcover  | Dateiname und das laufende Foto                       |
 //!
 //! `Pause` gibt es seit E-49 nicht mehr: Home Assistant zeigt bei `playing`
@@ -70,8 +71,17 @@ pub trait Backend: Send + Sync {
     fn set_volume(&self, level: u8);
     fn set_mute(&self, mute: bool);
     /// Ein Bild von aussen vormerken (E-52): rohe Bytes, wie geladen. Das
-    /// Dekodieren und Skalieren ist Sache des Rahmens (NF-12, NF-13).
-    fn stage_external(&self, image: Vec<u8>, title: String, uri: String) -> Result<(), String>;
+    /// Dekodieren und Skalieren ist Sache des Rahmens (NF-12, NF-13). Gibt die
+    /// Id des Fremdbilds zurueck.
+    fn stage_external(&self, image: Vec<u8>, title: String, uri: String) -> Result<String, String>;
+    /// Ist dieses Fremdbild noch da? Sonst hoert ein Kamerastrom auf (E-67).
+    fn external_alive(&self, id: &str) -> bool;
+    /// Neues Einzelbild eines Kamerastroms (E-67): rohe Bytes wie
+    /// `stage_external`. Rechenarbeit — der Aufrufer ruft es abseits des
+    /// Netz-Threads. `Err` bei einem unlesbaren Bild; das vorige bleibt.
+    fn live_frame(&self, id: &str, image: Vec<u8>) -> Result<(), String>;
+    /// Livebild von sich aus beenden, Zeitlimit oder Abriss (E-67).
+    fn end_live(&self, id: &str);
     /// Das sichtbare Bild als JPEG — fuer das Albumcover in Home Assistant.
     fn current_image(&self) -> Option<Vec<u8>>;
 }
@@ -265,6 +275,9 @@ pub(crate) mod tests {
     pub struct FakeBackend {
         pub snapshot: Mutex<Snapshot>,
         pub calls: Mutex<Vec<String>>,
+        /// Id des vorgemerkten oder haengenden Fremdbilds, wie im Rahmen.
+        pub external_id: Mutex<Option<String>>,
+        staged: Mutex<u32>,
     }
 
     impl Default for Snapshot {
@@ -306,7 +319,10 @@ pub(crate) mod tests {
         }
         fn stop(&self) {
             self.note("stop");
-            self.snapshot.lock().unwrap().screen_active = false;
+            // Wie im Rahmen: Stop raeumt zuerst ein Fremdbild ab.
+            if self.external_id.lock().unwrap().take().is_none() {
+                self.snapshot.lock().unwrap().screen_active = false;
+            }
         }
         fn next(&self) {
             self.note("next");
@@ -322,10 +338,33 @@ pub(crate) mod tests {
             self.note(&format!("mute:{mute}"));
             self.snapshot.lock().unwrap().screen_active = !mute;
         }
-        fn stage_external(&self, image: Vec<u8>, title: String, uri: String) -> Result<(), String> {
+        fn stage_external(
+            &self,
+            image: Vec<u8>,
+            title: String,
+            uri: String,
+        ) -> Result<String, String> {
             self.note(&format!("stage:{title}:{}", image.len()));
             self.snapshot.lock().unwrap().external_uri = Some(uri);
+            let mut n = self.staged.lock().unwrap();
+            *n += 1;
+            let id = format!("x_{n}");
+            *self.external_id.lock().unwrap() = Some(id.clone());
+            Ok(id)
+        }
+        fn external_alive(&self, id: &str) -> bool {
+            self.external_id.lock().unwrap().as_deref() == Some(id)
+        }
+        fn live_frame(&self, id: &str, image: Vec<u8>) -> Result<(), String> {
+            self.note(&format!("frame:{id}:{}", image.len()));
             Ok(())
+        }
+        fn end_live(&self, id: &str) {
+            self.note(&format!("end_live:{id}"));
+            let mut current = self.external_id.lock().unwrap();
+            if current.as_deref() == Some(id) {
+                *current = None;
+            }
         }
         fn current_image(&self) -> Option<Vec<u8>> {
             Some(vec![0xFF, 0xD8, 0xFF, 0xD9])

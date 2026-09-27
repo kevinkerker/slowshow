@@ -16,6 +16,7 @@
 pub mod description;
 pub mod gena;
 pub mod http;
+pub mod live;
 pub mod mjpeg;
 pub mod renderer;
 pub mod soap;
@@ -229,10 +230,31 @@ impl Backend for AppBackend {
         control::set_screen(&self.app, !mute, Origin::Upnp);
     }
 
-    fn stage_external(&self, image: Vec<u8>, title: String, uri: String) -> Result<(), String> {
+    fn stage_external(&self, image: Vec<u8>, title: String, uri: String) -> Result<String, String> {
         self.app
             .state::<AppState>()
             .stage_external(&image, &title, &uri)
+    }
+
+    fn external_alive(&self, id: &str) -> bool {
+        self.app.state::<AppState>().external_alive(id)
+    }
+
+    fn live_frame(&self, id: &str, image: Vec<u8>) -> Result<(), String> {
+        let shown = self
+            .app
+            .state::<AppState>()
+            .update_external_frame(id, &image)?;
+        // Nur ein haengendes Bild braucht die Oberflaeche nachzuladen; ein
+        // vorgemerktes zeigt `Play` ohnehin im neuesten Stand.
+        if let Some(frame) = shown {
+            control::live_frame(&self.app, id, frame);
+        }
+        Ok(())
+    }
+
+    fn end_live(&self, id: &str) {
+        control::end_live(&self.app, id);
     }
 
     fn current_image(&self) -> Option<Vec<u8>> {

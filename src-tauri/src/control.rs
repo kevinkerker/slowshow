@@ -242,16 +242,21 @@ pub fn show_external(app: &AppHandle) -> bool {
 /// zurück — Home Assistant schickt vor jedem `play_media` ein Stop, das ihn
 /// ohnehin überschrieben hätte.
 pub fn finish_external(app: &AppHandle) -> bool {
-    let state = app.state::<AppState>();
-    if !state.end_external() {
+    if !app.state::<AppState>().end_external() {
         return false;
     }
+    back_to_schedule(app);
+    true
+}
+
+/// Nach dem Ende eines Fremdbilds: Anzeigebefehl weg, der Zeitplan gilt.
+fn back_to_schedule(app: &AppHandle) {
+    let state = app.state::<AppState>();
     log::info!("Fremdbild beendet, es gilt wieder der Zeitplan");
     state.clear_display_override();
     let display = state.display_state();
     crate::brightness::apply(display.brightness);
     let _ = app.emit(events::DISPLAY, display);
-    true
 }
 
 /// Wie [`finish_external`], meldet aber auch das dann sichtbare Bild.
@@ -261,6 +266,33 @@ pub fn end_external(app: &AppHandle) -> bool {
         let _ = app.emit(events::SLIDE, app.state::<AppState>().current_slide());
     }
     ended
+}
+
+/// Beendet ein Livebild von sich aus — Zeitlimit oder Abriss (E-67) — und
+/// zeigt wieder die Diashow.
+///
+/// Nur, wenn noch *dieses* Fremdbild da ist: ein inzwischen geschicktes
+/// anderes bleibt haengen.
+pub fn end_live(app: &AppHandle, id: &str) -> bool {
+    let state = app.state::<AppState>();
+    if !state.end_external_if(id) {
+        return false;
+    }
+    back_to_schedule(app);
+    let _ = app.emit(events::SLIDE, state.current_slide());
+    true
+}
+
+/// Ein neues Einzelbild eines Kamerastroms (E-67). Die Oberflaeche laedt es
+/// ueber das Asset-Protokoll nach; die Nutzlast ist nur Id und Nummer.
+pub fn live_frame(app: &AppHandle, id: &str, frame: u32) {
+    let _ = app.emit(
+        events::LIVE_FRAME,
+        crate::state::LiveFrame {
+            id: id.to_string(),
+            frame,
+        },
+    );
 }
 
 /// Übernimmt eine Teilaktualisierung.

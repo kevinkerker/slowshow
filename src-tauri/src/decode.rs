@@ -242,6 +242,50 @@ pub fn thumbnail(cached_bytes: &[u8], edge: u32) -> Result<Vec<u8>, DecodeError>
     Ok(out)
 }
 
+/// Bereitet ein Einzelbild eines Kamerastroms auf (E-67).
+///
+/// Anders als [`prepare`] laeuft das mehrmals je Sekunde, deshalb zwei
+/// Abkuerzungen: Ein JPEG, das schon in die Displaygroesse passt, geht
+/// unveraendert durch — nur der Kopf wird gelesen, nicht das Bild. Ein
+/// groesseres wird mit `Triangle` statt `Lanczos3` verkleinert; bei einem
+/// Bild, das eine halbe Sekunde steht, sieht niemand den Unterschied, die
+/// Rechenzeit aber sinkt auf einen Bruchteil. EXIF bleibt aussen vor:
+/// Kamerastroeme tragen keines.
+pub fn live_frame(
+    bytes: &[u8],
+    max_w: u32,
+    max_h: u32,
+    quality: u8,
+) -> Result<Vec<u8>, DecodeError> {
+    // Auf einem Speicherpuffer kann das Raten des Formats nicht scheitern;
+    // der Fehlertyp ist trotzdem der einer Datei.
+    let reader = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(image::ImageError::IoError)?;
+    let is_jpeg = reader.format() == Some(image::ImageFormat::Jpeg);
+    let (w, h) = reader.into_dimensions()?;
+    if is_jpeg && w <= max_w && h <= max_h {
+        return Ok(bytes.to_vec());
+    }
+
+    let img = image::load_from_memory(bytes)?;
+    let (tw, th) = fit_within(img.width(), img.height(), max_w, max_h);
+    let img = if (tw, th) == (img.width(), img.height()) {
+        img
+    } else {
+        img.resize_exact(tw, th, image::imageops::FilterType::Triangle)
+    };
+    let rgb = img.into_rgb8();
+    let mut out = Vec::with_capacity((tw as usize * th as usize) / 4);
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality).write_image(
+        rgb.as_raw(),
+        tw,
+        th,
+        image::ExtendedColorType::Rgb8,
+    )?;
+    Ok(out)
+}
+
 // ── Hauptpfad ────────────────────────────────────────────────────────────────
 
 /// Dekodiert, richtet aus, skaliert und re-kodiert ein Bild für den Cache.
@@ -384,6 +428,48 @@ mod tests {
             (direkt.width, direkt.height)
         );
         assert_eq!(inplace.bytes, direkt.bytes);
+    }
+
+    // ── Einzelbilder eines Kamerastroms (E-67) ──────────────────────────────
+
+    #[test]
+    fn passendes_kamerabild_geht_unveraendert_durch_e_67() {
+        // Mehrmals je Sekunde dekodieren und neu kodieren, nur um dasselbe
+        // Bild zu erhalten, kostete Akku und Zeit fuer nichts.
+        let bild = test_jpeg(640, 360);
+        assert_eq!(live_frame(&bild, 1280, 800, 85).unwrap(), bild);
+    }
+
+    #[test]
+    fn zu_grosses_kamerabild_wird_verkleinert_e_67() {
+        let bild = test_jpeg(1280, 720);
+        let klein = live_frame(&bild, 640, 640, 85).unwrap();
+        let (w, h) = image::load_from_memory(&klein)
+            .unwrap()
+            .into_rgb8()
+            .dimensions();
+        assert_eq!((w, h), (640, 360));
+    }
+
+    #[test]
+    fn anderes_format_wird_zum_jpeg_e_67() {
+        // Das Asset-Protokoll liefert Fremdbilder als image/jpeg aus.
+        let mut png = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut png)
+            .write_image(
+                RgbImage::new(8, 6).as_raw(),
+                8,
+                6,
+                image::ExtendedColorType::Rgb8,
+            )
+            .unwrap();
+        let out = live_frame(&png, 100, 100, 85).unwrap();
+        assert!(out.starts_with(&[0xFF, 0xD8]), "kein JPEG");
+    }
+
+    #[test]
+    fn kaputtes_kamerabild_ist_ein_fehler_e_67() {
+        assert!(live_frame(b"kein bild", 100, 100, 85).is_err());
     }
 
     /// `prepare_yielding` darf ohne mehrfaedige Laufzeit nicht panicen.

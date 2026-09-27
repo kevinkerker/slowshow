@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
-import { imageUrl, reportDisplaySize, THUMB_PREFIX, thumbUrl } from './api'
+import { imageUrl, reportDisplaySize, stageUrl, THUMB_PREFIX, thumbUrl } from './api'
 
 /**
  * Die Bild-URLs sind eine Systemgrenze, die kein Compiler prüft: das Präfix
@@ -36,6 +36,37 @@ describe('Bild-URLs', () => {
     // Backend nicht mehr am Pfad auftrennen.
     expect(THUMB_PREFIX).not.toContain('/')
     expect(encodeURIComponent(THUMB_PREFIX)).toBe(THUMB_PREFIX)
+  })
+})
+
+/**
+ * Livebild eines Kamerastroms (E-67): dieselbe Id, je Einzelbild eine neue URL.
+ */
+describe('stageUrl', () => {
+  it('ist ohne Livebild die normale Bild-URL', () => {
+    expect(stageUrl('ea9c', null)).toBe(imageUrl('ea9c'))
+    expect(stageUrl('ea9c', undefined)).toBe(imageUrl('ea9c'))
+  })
+
+  it('haengt die Nummer des Einzelbilds als Anfrageparameter an', () => {
+    // Im Pfad duerfte sie nicht stehen: das Asset-Protokoll sucht das Bild
+    // unter dem Pfad, und `x_1` muss `x_1` bleiben.
+    const url = stageUrl('x_1', { id: 'x_1', frame: 7 })
+    expect(url).toBe(`${imageUrl('x_1')}?f=7`)
+    expect(new URL(url).pathname.endsWith('/x_1')).toBe(true)
+  })
+
+  it('macht jedes Einzelbild zu einer neuen URL', () => {
+    // Sonst laedt die WebView nichts nach, und das Livebild steht.
+    expect(stageUrl('x_1', { id: 'x_1', frame: 1 })).not.toBe(
+      stageUrl('x_1', { id: 'x_1', frame: 2 }),
+    )
+  })
+
+  it('laesst andere Bilder in Ruhe', () => {
+    // Im Paar-Modus steht ein Livebild nie; ein verspaetetes Ereignis darf
+    // trotzdem kein fremdes Bild umbiegen.
+    expect(stageUrl('ea9c', { id: 'x_1', frame: 3 })).toBe(imageUrl('ea9c'))
   })
 })
 

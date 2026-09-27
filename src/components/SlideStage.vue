@@ -9,8 +9,8 @@
  * flüssigen und einer ruckelnden Überblendung auf einem alten Tablet (R-02).
  */
 import { nextTick, ref, watch } from 'vue'
-import { imageUrl } from '@/lib/api'
-import type { FitMode, Slide } from '@/lib/types'
+import { stageUrl } from '@/lib/api'
+import type { FitMode, LiveFrame, Slide } from '@/lib/types'
 
 const props = defineProps<{
   slide: Slide | null
@@ -18,6 +18,12 @@ const props = defineProps<{
   transitionEnabled: boolean
   transitionMs: number
   kenBurns: boolean
+  /**
+   * Neuestes Einzelbild eines Kamerastroms (E-67). Wechselt nur die Quelle
+   * des Bildes, nicht die Ebene — ein Livebild blendet nicht bei jedem
+   * Einzelbild über.
+   */
+  liveFrame?: LiveFrame | null
 }>()
 
 interface Layer {
@@ -77,7 +83,7 @@ function idsOf(slide: Slide | null): string[] {
           :key="`${layer.generation}-${id}`"
           class="photo"
           :class="[props.fitMode, { 'ken-burns': props.kenBurns }]"
-          :src="imageUrl(id)"
+          :src="stageUrl(id, props.liveFrame)"
           alt=""
           decoding="async"
           draggable="false"

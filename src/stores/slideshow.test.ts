@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { listen } from '@tauri-apps/api/event'
 import { createPinia, setActivePinia } from 'pinia'
 import { useSlideshowStore } from './slideshow'
 import * as api from '@/lib/api'
-import type { Slide } from '@/lib/types'
+import { EVENTS, type LiveFrame, type Slide } from '@/lib/types'
 
 /**
  * Der Taktgeber der Diashow.
@@ -94,6 +95,71 @@ describe('slideshowStore: Taktgeber', () => {
     await vi.advanceTimersByTimeAsync(TAKT * 1000)
     expect(next).toHaveBeenCalledTimes(2)
 
+    store.dispose()
+  })
+})
+
+/**
+ * Livebild eines Kamerastroms (E-67).
+ *
+ * Das Backend meldet je Einzelbild nur Id und Nummer; die Bühne lädt das Bild
+ * selbst. Der Store reicht die Nummer nur weiter, solange genau dieser Strom
+ * an der Wand hängt.
+ */
+describe('slideshowStore: Livebild', () => {
+  /** Der zuletzt angemeldete Zuhörer für ein Ereignis. */
+  function zuhoerer<T>(name: string) {
+    const treffer = vi.mocked(listen).mock.calls.filter((c) => c[0] === name).pop()
+    if (!treffer) throw new Error(`Kein Zuhoerer fuer ${name}`)
+    return treffer[1] as (e: { payload: T }) => void
+  }
+
+  const LIVE = { kind: 'single', id: 'x_1' } as Slide
+
+  async function mitLivebild() {
+    const store = await starte()
+    // Home Assistant hat die Kamera geschickt: das Fremdbild haengt.
+    zuhoerer<Slide | null>(EVENTS.slide)({ payload: LIVE })
+    await vi.advanceTimersByTimeAsync(0)
+    return store
+  }
+
+  it('reicht die Nummer des neuesten Einzelbilds weiter', async () => {
+    const store = await mitLivebild()
+    zuhoerer<LiveFrame>(EVENTS.liveFrame)({ payload: { id: 'x_1', frame: 4 } })
+    expect(store.liveFrame).toEqual({ id: 'x_1', frame: 4 })
+    zuhoerer<LiveFrame>(EVENTS.liveFrame)({ payload: { id: 'x_1', frame: 5 } })
+    expect(store.liveFrame).toEqual({ id: 'x_1', frame: 5 })
+    store.dispose()
+  })
+
+  it('schaltet dafuer nicht weiter und laedt keine Metadaten', async () => {
+    // Fuenf Einzelbilder je Sekunde, jedes ein Aufruf ueber die Bruecke —
+    // das waere die Last, die das Livebild gerade vermeiden soll.
+    const store = await mitLivebild()
+    const info = vi.mocked(api.imageInfo)
+    const vorher = info.mock.calls.length
+    zuhoerer<LiveFrame>(EVENTS.liveFrame)({ payload: { id: 'x_1', frame: 1 } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(info.mock.calls.length).toBe(vorher)
+    expect(store.slide).toEqual(LIVE)
+    store.dispose()
+  })
+
+  it('vergisst das Livebild, sobald wieder die Diashow laeuft', async () => {
+    const store = await mitLivebild()
+    zuhoerer<LiveFrame>(EVENTS.liveFrame)({ payload: { id: 'x_1', frame: 4 } })
+    // Stop, Geste oder Zeitlimit: das Backend meldet das naechste Foto.
+    zuhoerer<Slide | null>(EVENTS.slide)({ payload: SLIDE })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(store.liveFrame).toBeNull()
+    store.dispose()
+  })
+
+  it('ignoriert ein verspaetetes Einzelbild eines beendeten Stroms', async () => {
+    const store = await starte()
+    zuhoerer<LiveFrame>(EVENTS.liveFrame)({ payload: { id: 'x_1', frame: 9 } })
+    expect(store.liveFrame).toBeNull()
     store.dispose()
   })
 })

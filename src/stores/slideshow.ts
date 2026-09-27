@@ -11,7 +11,7 @@ import { defineStore } from 'pinia'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { computed, ref } from 'vue'
 import * as api from '@/lib/api'
-import { EVENTS, slideIds, type CacheEntry, type Slide } from '@/lib/types'
+import { EVENTS, slideIds, type CacheEntry, type LiveFrame, type Slide } from '@/lib/types'
 
 export const useSlideshowStore = defineStore('slideshow', () => {
   const slide = ref<Slide | null>(null)
@@ -46,6 +46,18 @@ export const useSlideshowStore = defineStore('slideshow', () => {
 
   const currentIds = computed(() => slideIds(slide.value))
 
+  /** Zuletzt gemeldetes Einzelbild eines Kamerastroms (E-67). */
+  const lastLiveFrame = ref<LiveFrame | null>(null)
+  /**
+   * Das Einzelbild, das die Bühne zeigen soll — nur solange sein Strom an der
+   * Wand hängt. Ein verspätetes Ereignis eines beendeten Stroms fällt so von
+   * selbst heraus; Fremdbild-Ids werden nie wiederverwendet.
+   */
+  const liveFrame = computed(() => {
+    const live = lastLiveFrame.value
+    return live && currentIds.value.includes(live.id) ? live : null
+  })
+
   async function start(intervalSeconds: () => number, active: () => boolean) {
     intervalGetter = intervalSeconds
     activeGetter = active
@@ -62,6 +74,13 @@ export const useSlideshowStore = defineStore('slideshow', () => {
         // mitnehmen.
         restartTimer()
         await refreshInfo()
+      }),
+    )
+    // Livebild (E-67): kein Bildwechsel, kein Takt, keine Metadaten — nur
+    // die Nummer, unter der die Bühne das neueste Einzelbild nachlädt.
+    unlisten.push(
+      await listen<LiveFrame>(EVENTS.liveFrame, (e) => {
+        lastLiveFrame.value = e.payload
       }),
     )
     // Waehrend eines Syncs: sobald das erste Bild im Cache liegt, anzeigen,
@@ -234,6 +253,7 @@ export const useSlideshowStore = defineStore('slideshow', () => {
     info,
     hasImages,
     currentIds,
+    liveFrame,
     start,
     dispose,
     next,

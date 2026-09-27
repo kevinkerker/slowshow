@@ -144,6 +144,18 @@ function describe(report: SyncReport | null): { text: string; failed: boolean } 
   }
   if (report.error) return { text: t('sources.syncFailed', { error: report.error }), failed: true }
   if (report.truncated) return { text: t('sources.syncTruncated'), failed: false }
+  // Nichts abgelegt, aber etwas gescheitert: das ist ein Fehler und bleibt
+  // stehen (E-62), samt erstem Grund. Als verblassende Erfolgsmeldung sah ein
+  // Tester nur "Keine Aenderungen · 1387 fehlgeschlagen" (E-69).
+  if (report.failed > 0 && report.added + report.updated === 0) {
+    const n = report.failed
+    return {
+      text: report.firstFailure
+        ? t('sources.syncAllFailed', { n, reason: report.firstFailure })
+        : t('sources.syncFailedCount', { n }),
+      failed: true,
+    }
+  }
   const parts: string[] = []
   if (report.added + report.updated + report.removed === 0) {
     parts.push(t('sources.syncNothing'))

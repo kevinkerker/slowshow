@@ -101,12 +101,14 @@
     "syncProgress": "Lädt {done} von {total}",
     "syncListing": "Durchsuche Quelle …",
     "syncSkipped": "{n} übersprungen",
-    "syncFailedCount": "{n} fehlgeschlagen"
+    "syncFailedCount": "{n} fehlgeschlagen",
+    "syncAllFailed": "{n} fehlgeschlagen — {reason}"
   },
   "sourceForm": {
     "titleAdd": "Quelle hinzufügen",
     "titleEdit": "Quelle bearbeiten",
     "kind": "Art der Quelle",
+    "kindChange": "Ändern",
     "kind_local": "Lokaler Ordner",
     "kind_local_hint": "Ordner auf dem Tablet oder der SD-Karte",
     "kind_webDav": "NAS über WebDAV",
@@ -160,7 +162,7 @@
     "allowInsecureTls": "Selbstsigniertes Zertifikat akzeptieren",
     "allowInsecureTlsHint": "Nur im eigenen Heimnetz sinnvoll.",
     "subfolders": "Nur diese Unterordner",
-    "subfoldersPlaceholder": "Urlaub, Familie/2025",
+    "subfoldersPlaceholder": "z. B. Urlaub, Familie/2025",
     "subfoldersHint": "Mehrere durch Komma trennen. Leer = alle.",
     "minResolution": "Mindestauflösung",
     "minResolutionHint": "Kleinere Bilder werden übersprungen. 0 = kein Filter.",

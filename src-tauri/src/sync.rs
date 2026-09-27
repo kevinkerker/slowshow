@@ -53,6 +53,13 @@ pub struct SyncReport {
     /// Die Quelle war größer als die Obergrenzen — Liste unvollständig.
     pub truncated: bool,
     pub error: Option<String>,
+    /// Grund des ersten Fehlschlags, mit dem Schritt davor ("Lesen: …").
+    ///
+    /// Ohne ihn stand am Rahmen eines Testers nur „1387 fehlgeschlagen" — der
+    /// Grund lag im App-Log, an das ohne adb niemand herankommt. Einer genuegt:
+    /// scheitern alle, scheitern sie fast immer am selben. Ohne Dateinamen,
+    /// denn der Text geht in den Diagnosebericht.
+    pub first_failure: Option<String>,
 }
 
 impl SyncReport {
@@ -68,7 +75,33 @@ impl SyncReport {
     pub fn changed_anything(&self) -> bool {
         self.added + self.updated + self.removed + self.evicted > 0
     }
+
+    /// Zaehlt einen Fehlschlag und behaelt den ersten Grund.
+    pub fn fail(&mut self, stage: &str, cause: impl std::fmt::Display) {
+        self.failed += 1;
+        if self.first_failure.is_none() {
+            self.first_failure = Some(format!("{stage}: {cause}"));
+        }
+    }
+
+    /// Zaehlt ein gescheitertes Ablegen. `true` heisst: der Lauf muss enden.
+    ///
+    /// Bei vollem Speicher scheitert jede weitere Datei genauso — gemessen am
+    /// Emulator, 12 von 12. Weiterzulaufen dekodierte jedes Bild umsonst, und
+    /// ohne `error` meldete die Oberflaeche den Totalausfall als Erfolg (E-69).
+    pub fn fail_store(&mut self, e: &crate::cache::CacheError) -> bool {
+        self.fail("Ablegen", e);
+        if e.is_storage_full() {
+            self.error = Some(STORAGE_FULL.into());
+            return true;
+        }
+        false
+    }
 }
+
+/// Meldung, wenn der Speicher des Tablets voll ist (E-69).
+pub const STORAGE_FULL: &str =
+    "Speicher des Tablets voll — Platz schaffen oder die Cache-Groesse verringern, dann erneut abgleichen";
 
 /// Was ein Sync-Lauf tun muss.
 #[derive(Debug, Default)]
@@ -191,7 +224,7 @@ pub async fn sync_source(
                     source.name,
                     file.rel_path
                 );
-                report.failed += 1;
+                report.fail("Lesen", &e);
                 continue;
             }
         };
@@ -202,7 +235,7 @@ pub async fn sync_source(
         // gemessen an einem Panorama mit 15 131 von 65 383 Bytes (E-45). Als
         // Fehlschlag gezaehlt bleibt die Datei ausserhalb des Index und wird
         // beim naechsten Lauf erneut geholt.
-        if client.delivers_original() && !transfer_complete(file.size, bytes.len()) {
+        if client.checks_transfer_length() && !transfer_complete(file.size, bytes.len()) {
             log::warn!(
                 "'{}': {} unvollstaendig uebertragen: {} von {} Bytes",
                 source.name,
@@ -210,7 +243,10 @@ pub async fn sync_source(
                 bytes.len(),
                 file.size.unwrap_or(0)
             );
-            report.failed += 1;
+            report.fail(
+                "Unvollstaendig",
+                format!("{} von {} Bytes", bytes.len(), file.size.unwrap_or(0)),
+            );
             continue;
         }
 
@@ -248,7 +284,7 @@ pub async fn sync_source(
                     source.name,
                     file.rel_path
                 );
-                report.failed += 1;
+                report.fail("Dekodieren", &e);
                 continue;
             }
         };
@@ -291,7 +327,9 @@ pub async fn sync_source(
                     source.name,
                     file.rel_path
                 );
-                report.failed += 1;
+                if report.fail_store(&e) {
+                    break;
+                }
             }
         }
 
@@ -446,6 +484,33 @@ mod tests {
         // Groesse nie im Cache.
         assert!(transfer_complete(None, 4_096));
         assert!(transfer_complete(Some(0), 4_096));
+    }
+
+    #[test]
+    fn fehlschlag_behaelt_den_ersten_grund() {
+        let mut r = SyncReport::for_source("s");
+        r.fail("Lesen", "Datei nicht lesbar: permission denied");
+        r.fail("Dekodieren", "kaputt");
+        assert_eq!(r.failed, 2);
+        assert_eq!(
+            r.first_failure.as_deref(),
+            Some("Lesen: Datei nicht lesbar: permission denied")
+        );
+    }
+
+    #[test]
+    fn voller_speicher_beendet_den_lauf_mit_fehler_e_69() {
+        let mut r = SyncReport::for_source("s");
+        let voll = crate::cache::CacheError::Io(std::io::ErrorKind::StorageFull.into());
+        assert!(r.fail_store(&voll), "der Lauf muss enden");
+        assert_eq!(r.failed, 1);
+        assert_eq!(r.error.as_deref(), Some(STORAGE_FULL));
+
+        let mut r = SyncReport::for_source("s");
+        let anderes = crate::cache::CacheError::Io(std::io::ErrorKind::PermissionDenied.into());
+        assert!(!r.fail_store(&anderes), "ein Einzelfehler laesst den Lauf weiterlaufen");
+        assert!(r.error.is_none());
+        assert!(r.first_failure.unwrap().starts_with("Ablegen:"));
     }
 
     #[test]

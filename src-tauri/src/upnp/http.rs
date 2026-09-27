@@ -121,7 +121,7 @@ async fn control(
 
 /// Groesstes Fremdbild, das geladen wird (E-52). Ein Kamerabild hat wenige MB;
 /// darueber ist es kein Bild fuer einen Rahmen, sondern ein Versehen.
-const MAX_EXTERNAL_BYTES: usize = 25 * 1024 * 1024;
+pub(super) const MAX_EXTERNAL_BYTES: usize = 25 * 1024 * 1024;
 /// Wie lange auf die Quelle gewartet wird. Home Assistant wartet seinerseits
 /// auf unsere Antwort; laenger als das haelt es nicht durch.
 const EXTERNAL_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
@@ -140,10 +140,14 @@ const EXTERNAL_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 /// „nicht erreichbar".
 async fn set_transport_uri(ctx: &Arc<Ctx>, action: &Action) -> Response {
     let service_type = Service::Avt.service_type();
-    let ok = || xml(StatusCode::OK, soap::response(service_type, &action.name, &[]));
-    let fault = |code: u16, text: &str| {
-        xml(StatusCode::INTERNAL_SERVER_ERROR, soap::fault(code, text))
+    let ok = || {
+        xml(
+            StatusCode::OK,
+            soap::response(service_type, &action.name, &[]),
+        )
     };
+    let fault =
+        |code: u16, text: &str| xml(StatusCode::INTERNAL_SERVER_ERROR, soap::fault(code, text));
 
     let uri = action.arg("CurrentURI").map(str::trim).unwrap_or("");
     if uri.is_empty() {
@@ -161,8 +165,9 @@ async fn set_transport_uri(ctx: &Arc<Ctx>, action: &Action) -> Response {
     // Mit Zeit im Log, weil das Ende allein nichts ueber die Dauer sagt — die
     // Frage „warum dauert das" war ohne diese Zeile nicht zu beantworten.
     log::info!("UPnP: Fremdbild angefordert von {uri}");
-    let bytes = match fetch_image(&ctx.client, uri).await {
-        Ok(bytes) => bytes,
+    let (bytes, stream) = match fetch_image(&ctx.client, uri).await {
+        Ok(Fetched::Image(bytes)) => (bytes, None),
+        Ok(Fetched::Stream(first, stream)) => (first, Some(stream)),
         Err(Fetch::Unreachable(e)) => {
             log::info!("UPnP: Fremdbild nicht ladbar von {uri}: {e}");
             return fault(716, "Resource not found");
@@ -184,12 +189,17 @@ async fn set_transport_uri(ctx: &Arc<Ctx>, action: &Action) -> Response {
     let (t, u) = (title.clone(), uri.to_string());
     let staged = tokio::task::spawn_blocking(move || backend.stage_external(bytes, t, u)).await;
     match staged {
-        Ok(Ok(())) => {
+        Ok(Ok(id)) => {
             log::info!("UPnP: Fremdbild {title:?} vorgemerkt von {uri}");
             if was_playing {
                 // Laeuft der Renderer, laeuft die neue Adresse sofort — wie bei
                 // jedem Medienrenderer. `play` zeigt das eben vorgemerkte Bild.
                 ctx.backend.play();
+            }
+            // Ein Kamerastrom liest weiter und haelt das Bild aktuell (E-67).
+            // Die Antwort an Home Assistant wartet darauf nicht.
+            if let Some(stream) = stream {
+                tokio::spawn(super::live::run(ctx.clone(), id, uri.to_string(), stream));
             }
             publish(ctx.clone()).await;
             ok()
@@ -210,10 +220,31 @@ enum Fetch {
     NotImage(String),
 }
 
-async fn fetch_image(client: &reqwest::Client, uri: &str) -> Result<Vec<u8>, Fetch> {
+/// Was die Adresse lieferte: ein Bild, oder das erste Bild eines Stroms samt
+/// dem offenen Strom fuer das Livebild (E-67).
+enum Fetched {
+    Image(Vec<u8>),
+    Stream(Vec<u8>, super::live::Stream),
+}
+
+/// Laedt das Fremdbild; die Zeitgrenze gilt bis zum ersten Bild.
+///
+/// Nicht ueber `RequestBuilder::timeout`: die zaehlt bis zum Ende des Rumpfs,
+/// und ein Kamerastrom endet nie — das Livebild waere nach 15 s abgerissen.
+/// Danach wacht der Livebild-Lauf mit seiner eigenen Leerlaufgrenze (E-67).
+async fn fetch_image(client: &reqwest::Client, uri: &str) -> Result<Fetched, Fetch> {
+    match tokio::time::timeout(EXTERNAL_FETCH_TIMEOUT, fetch_first(client, uri)).await {
+        Ok(result) => result,
+        Err(_) => Err(Fetch::Unreachable(format!(
+            "keine Antwort binnen {} s",
+            EXTERNAL_FETCH_TIMEOUT.as_secs()
+        ))),
+    }
+}
+
+async fn fetch_first(client: &reqwest::Client, uri: &str) -> Result<Fetched, Fetch> {
     let resp = client
         .get(uri)
-        .timeout(EXTERNAL_FETCH_TIMEOUT)
         .send()
         .await
         .map_err(|e| Fetch::Unreachable(e.to_string()))?;
@@ -231,9 +262,12 @@ async fn fetch_image(client: &reqwest::Client, uri: &str) -> Result<Vec<u8>, Fet
         .and_then(|v| v.to_str().ok())
     {
         let ct = ct.to_ascii_lowercase();
-        // Ein Kamerastrom (E-55): das erste Bild daraus, dann Schluss.
+        // Ein Kamerastrom (E-55): das erste Bild daraus, der Rest wird
+        // Livebild (E-67).
         if super::mjpeg::is_multipart_stream(&ct) {
-            return first_frame_of_stream(resp, uri, super::mjpeg::boundary_of(&ct)).await;
+            let mut stream = super::live::Stream::new(resp, super::mjpeg::boundary_of(&ct));
+            let first = first_frame_of_stream(&mut stream, uri).await?;
+            return Ok(Fetched::Stream(first, stream));
         }
         if !(ct.starts_with("image/") || ct.starts_with("application/octet-stream")) {
             return Err(Fetch::NotImage(ct));
@@ -246,7 +280,7 @@ async fn fetch_image(client: &reqwest::Client, uri: &str) -> Result<Vec<u8>, Fet
     if bytes.len() > MAX_EXTERNAL_BYTES {
         return Err(Fetch::NotImage(format!("{} Bytes", bytes.len())));
     }
-    Ok(bytes.to_vec())
+    Ok(Fetched::Image(bytes.to_vec()))
 }
 
 /// Liest einen `multipart/x-mixed-replace`-Strom nur so weit, bis das erste
@@ -254,18 +288,16 @@ async fn fetch_image(client: &reqwest::Client, uri: &str) -> Result<Vec<u8>, Fet
 ///
 /// Der Strom endet von sich aus nie; wer ihn ganz lesen wollte, liefe in den
 /// Zeitablauf und die Groessengrenze. Deshalb Stueck fuer Stueck, und nach
-/// jedem Stueck die Frage an den Parser. Der Zeitablauf der Anfrage gilt
-/// weiter — bleibt die Kamera stumm, kommt 716 wie bei jeder anderen Quelle.
+/// jedem Stueck die Frage an den Parser. Die Zeitgrenze aus [`fetch_image`]
+/// gilt — bleibt die Kamera stumm, kommt 716 wie bei jeder anderen Quelle.
+/// Der Strom bleibt danach offen fuer das Livebild (E-67).
 async fn first_frame_of_stream(
-    mut resp: reqwest::Response,
+    stream: &mut super::live::Stream,
     uri: &str,
-    boundary: Option<String>,
 ) -> Result<Vec<u8>, Fetch> {
-    use super::mjpeg::{first_part, Part};
-
-    let mut buf: Vec<u8> = Vec::new();
     loop {
-        let chunk = resp
+        let chunk = stream
+            .resp
             .chunk()
             .await
             .map_err(|e| Fetch::Unreachable(e.to_string()))?;
@@ -275,23 +307,23 @@ async fn first_frame_of_stream(
                 "Strom endete ohne vollstaendiges Bild".to_string(),
             ));
         };
-        buf.extend_from_slice(&chunk);
-        if buf.len() > MAX_EXTERNAL_BYTES {
+        stream.frames.push(&chunk);
+        if stream.frames.pending() > MAX_EXTERNAL_BYTES {
             return Err(Fetch::NotImage(format!(
                 "Strom ohne Bild nach {} Bytes",
-                buf.len()
+                stream.frames.pending()
             )));
         }
-        match first_part(&buf, boundary.as_deref()) {
-            Part::Complete { body, .. } => {
+        match stream.frames.latest() {
+            Ok(Some(body)) => {
                 log::info!(
                     "UPnP: Kamerastrom von {uri}: erstes Bild uebernommen ({} Bytes)",
                     body.len()
                 );
                 return Ok(body);
             }
-            Part::Invalid(why) => return Err(Fetch::NotImage(why)),
-            Part::Incomplete => continue,
+            Ok(None) => continue,
+            Err(why) => return Err(Fetch::NotImage(why)),
         }
     }
 }
@@ -454,7 +486,12 @@ async fn event(
     let Some(service) = Service::from_slug(&svc) else {
         return empty(StatusCode::NOT_FOUND);
     };
-    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok()).map(str::trim);
+    let header = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+    };
 
     match method.as_str() {
         "SUBSCRIBE" => {
@@ -893,8 +930,10 @@ mod tests {
             started.elapsed()
         );
         // Genau das erste JPEG, ohne Kopfzeilen und Trenner, benannt nach dem
-        // Pfad — und sofort gezeigt, weil das Double laeuft (E-56).
-        assert_eq!(fake.calls(), vec!["stage:strom:4", "play"]);
+        // Pfad — und sofort gezeigt, weil das Double laeuft (E-56). Die
+        // Einzelbilder, die das Livebild danach nachreicht (E-67), zaehlen
+        // hier nicht; die prueft der Test darunter.
+        assert_eq!(ohne_einzelbilder(&fake), vec!["stage:strom:4", "play"]);
 
         // Ein Strom aus Text ist kein Bild: 714, wie bei einer Textdatei.
         let resp = app
@@ -903,7 +942,73 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert!(body_of(resp).await.contains("<errorCode>714</errorCode>"));
-        assert_eq!(fake.calls().len(), 2, "nichts weiteres vorgemerkt oder gezeigt");
+        assert_eq!(
+            ohne_einzelbilder(&fake).len(),
+            2,
+            "nichts weiteres vorgemerkt oder gezeigt"
+        );
+    }
+
+    fn ohne_einzelbilder(fake: &FakeBackend) -> Vec<String> {
+        fake.calls()
+            .into_iter()
+            .filter(|c| !c.starts_with("frame:"))
+            .collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn kamerastrom_laeuft_als_livebild_weiter_bis_stop_e_67() {
+        // Der ganze Weg: SetAVTransportURI antwortet nach dem ersten Bild, der
+        // Strom bleibt offen und reicht weitere Einzelbilder nach, bis Home
+        // Assistant Stop schickt.
+        let (fake, app) = setup();
+        let base = bildserver().await;
+        let resp = app
+            .clone()
+            .oneshot(set_uri(&format!("{base}/strom"), ""))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Der Server liefert alle 50 ms ein Bild, der Rahmen nimmt hoechstens
+        // alle 200 ms eines (MIN_FRAME_GAP).
+        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+        let einzelbilder = fake
+            .calls()
+            .iter()
+            .filter(|c| c.starts_with("frame:x_1:"))
+            .count();
+        assert!(
+            (2..=6).contains(&einzelbilder),
+            "{einzelbilder} Einzelbilder: {:?}",
+            fake.calls()
+        );
+
+        let resp = app
+            .oneshot(soap_req(
+                "avt",
+                Service::Avt.service_type(),
+                "Stop",
+                "<InstanceID>0</InstanceID>",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(!fake.external_alive("x_1"), "Stop raeumt das Livebild ab");
+        // Nach Stop kommt hoechstens noch ein Bild, das schon in Arbeit war.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let danach = fake
+            .calls()
+            .iter()
+            .filter(|c| c.starts_with("frame:x_1:"))
+            .count();
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let spaeter = fake
+            .calls()
+            .iter()
+            .filter(|c| c.starts_with("frame:x_1:"))
+            .count();
+        assert_eq!(danach, spaeter, "der Strom liest nach Stop weiter");
     }
 
     #[tokio::test]

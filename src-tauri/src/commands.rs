@@ -655,6 +655,8 @@ pub fn diagnostic_report(
         .map(|l| l.recent())
         .unwrap_or_default();
 
+    let last_syncs = state.last_syncs();
+
     let cache = state.cache.lock().map_err(|_| "Cache gesperrt")?;
     let stats = crate::maintenance::playback_stats(
         cache.index(),
@@ -680,6 +682,7 @@ pub fn diagnostic_report(
             storage: &storage,
             check: &check,
             fetch_log: &fetch_log,
+            last_syncs: &last_syncs,
             cache_bytes: stats_cache.bytes,
             cache_max_bytes: stats_cache.max_bytes,
         },
@@ -1319,12 +1322,16 @@ pub async fn run_sync(
     // `join_all` behaelt die Reihenfolge des Eingangs bei, nicht die des Endes:
     // sonst haenge die Zuordnung Bericht -> Quelle daran, welche Quelle
     // zufaellig schneller war.
-    let reports = futures_util::future::join_all(laeufe)
+    let reports: Vec<SyncReport> = futures_util::future::join_all(laeufe)
         .await
         .into_iter()
         .flatten()
         .collect();
 
+    let state = app.state::<AppState>();
+    for r in &reports {
+        state.remember_sync(r);
+    }
     Ok(reports)
 }
 

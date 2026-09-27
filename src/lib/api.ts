@@ -17,6 +17,7 @@ import type {
   FilterFacets,
   ImageFilter,
   ImagePage,
+  LiveFrame,
   MqttStatus,
   Slide,
   Source,
@@ -37,6 +38,21 @@ import type {
  */
 export function imageUrl(id: string): string {
   return convertFileSrc(id, 'slowshow')
+}
+
+/**
+ * URL eines Bildes auf der Bühne — beim Livebild eines Kamerastroms (E-67)
+ * die des neuesten Einzelbilds.
+ *
+ * Die Id bleibt über den ganzen Strom dieselbe; das Backend liefert unter ihr
+ * stets das neueste Bild. Die Nummer als Anfrageparameter macht die URL je
+ * Einzelbild neu, sonst lüde die WebView nichts nach. Das Asset-Protokoll
+ * liest nur den Pfad. Das alte Bild bleibt stehen, bis das neue geladen ist
+ * (HTML: „pending request") — kein Flackern, kein Vorladen nötig.
+ */
+export function stageUrl(id: string, live: LiveFrame | null | undefined): string {
+  if (live && live.id === id) return `${imageUrl(id)}?f=${live.frame}`
+  return imageUrl(id)
 }
 
 /**

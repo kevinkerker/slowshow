@@ -101,12 +101,14 @@
     "syncProgress": "Loading {done} of {total}",
     "syncListing": "Scanning source …",
     "syncSkipped": "{n} skipped",
-    "syncFailedCount": "{n} failed"
+    "syncFailedCount": "{n} failed",
+    "syncAllFailed": "{n} failed — {reason}"
   },
   "sourceForm": {
     "titleAdd": "Add source",
     "titleEdit": "Edit source",
     "kind": "Source type",
+    "kindChange": "Change",
     "kind_local": "Local folder",
     "kind_local_hint": "A folder on the tablet or SD card",
     "kind_webDav": "NAS via WebDAV",
@@ -160,7 +162,7 @@
     "allowInsecureTls": "Accept self-signed certificate",
     "allowInsecureTlsHint": "Only sensible on your own home network.",
     "subfolders": "Only these subfolders",
-    "subfoldersPlaceholder": "Holidays, Family/2025",
+    "subfoldersPlaceholder": "e.g. Holidays, Family/2025",
     "subfoldersHint": "Separate several with commas. Empty = all.",
     "minResolution": "Minimum resolution",
     "minResolutionHint": "Smaller photos are skipped. 0 = no filter.",

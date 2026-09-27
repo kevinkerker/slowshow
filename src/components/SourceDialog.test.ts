@@ -106,6 +106,24 @@ function form(kind: keyof typeof KINDS) {
   return w
 }
 
+/** Neuer Dialog, steht in Schritt 1 (E-66). */
+function fresh() {
+  return mount(SourceDialog, {
+    props: { source: null },
+    global: { plugins: [i18n] },
+  })
+}
+
+/** Tippt in Schritt 1 auf die Karte mit dieser Aufschrift (E-66). */
+async function pick(w: ReturnType<typeof fresh>, title: string) {
+  const karte = w.findAll('.kinds .kind').find((k) => k.text().includes(title))
+  expect(karte, `Karte „${title}" nicht gefunden`).toBeTruthy()
+  // Der Finger trifft die Karte; der Browser reicht den Klick ans Radiofeld
+  // weiter. jsdom tut das nicht, also direkt aufs Feld.
+  await karte!.get('input[type="radio"]').trigger('click')
+  await w.vm.$nextTick()
+}
+
 /** Alle sichtbaren Beschriftungen des Formulars. */
 function labels(w: ReturnType<typeof form>): string[] {
   return w.findAll('.row-label, label, .label').map((el) => el.text())
@@ -131,6 +149,14 @@ describe('SourceDialog — Felder je Quellenart', () => {
     // das nichts bewirkt, ist schlimmer als keines.
     expect(form('mail').text()).not.toContain('Nur diese Unterordner')
     expect(form('webDav').text()).toContain('Nur diese Unterordner')
+  })
+
+  it('kennzeichnet den Unterordner-Platzhalter als Beispiel (E-68)', () => {
+    // Ohne „z. B." hielt ein Tester den Platzhalter fuer einen eingetragenen
+    // Wert, der sich nicht loeschen liess — das Feld war leer.
+    const input = form('local').find('input[placeholder*="Urlaub"]')
+    expect(input.attributes('placeholder')).toBe('z. B. Urlaub, Familie/2025')
+    expect((input.element as HTMLInputElement).value).toBe('')
   })
 
   it('bietet den Abrufabstand auch beim Postfach an', () => {
@@ -511,12 +537,8 @@ describe('SourceDialog — Felder je Quellenart', () => {
       props: { source: null },
       global: { plugins: [i18n] },
     })
-    // Auf „Postfach" umschalten: die Hinweise haengen an dessen Feldern.
-    // Es sind echte Radiofelder; `setValue` schaltet sie um.
-    const arten = w.findAll('.kinds input[type="radio"]')
-    expect(arten.length, 'Auswahl der Quellenart nicht gefunden').toBe(4)
-    await arten[3].setValue()
-    await w.vm.$nextTick()
+    // „Postfach" waehlen: die Hinweise haengen an dessen Feldern (E-66).
+    await pick(w, 'Postfach')
 
     const text = w.text()
     expect(text).toContain('App-Passwort')
@@ -530,5 +552,105 @@ describe('SourceDialog — Felder je Quellenart', () => {
     await w.vm.$nextTick()
     expect(w.text()).toContain('Leer lassen')
     expect(w.text()).not.toContain('App-Passwort')
+  })
+})
+
+describe('SourceDialog — Anlegen in zwei Schritten (E-66)', () => {
+  // Anlass: Tester sahen nur die vier Karten der Quellenart und merkten nicht,
+  // dass darunter das Formular begann. Jetzt fuehrt ein Tipp auf die Karte
+  // ins Formular, und in Schritt 1 steht nichts, das man uebersehen koennte.
+
+  it('zeigt beim Anlegen zuerst nur die Quellenarten', () => {
+    const w = fresh()
+    expect(w.findAll('.kinds .kind')).toHaveLength(4)
+    expect(w.text()).not.toContain('Bezeichnung')
+    expect(w.find('input[type="text"]').exists()).toBe(false)
+  })
+
+  it('bietet in Schritt 1 weder Speichern noch Verbindungstest an', () => {
+    // Beides saesse ohne Formular im Leeren; Abbrechen muss bleiben.
+    const w = fresh()
+    const knoepfe = w.findAll('.foot button').map((b) => b.text())
+    expect(knoepfe).toContain('Abbrechen')
+    expect(knoepfe).not.toContain('Speichern')
+    expect(knoepfe.some((k) => k.includes('Verbindung testen'))).toBe(false)
+  })
+
+  it('fuehrt mit einem Tipp ins Formular der gewaehlten Art', async () => {
+    const w = fresh()
+    await pick(w, 'NAS über WebDAV')
+
+    expect(w.find('.kinds').exists()).toBe(false)
+    expect(w.get('.kind-chosen').text()).toContain('NAS über WebDAV')
+    expect(w.find('input[type="url"]').exists()).toBe(true)
+    const knoepfe = w.findAll('.foot button').map((b) => b.text())
+    expect(knoepfe).toContain('Speichern')
+    expect(knoepfe.some((k) => k.includes('Verbindung testen'))).toBe(true)
+  })
+
+  it('fuehrt mit „Ändern" zurueck und behaelt die Eingaben', async () => {
+    const w = fresh()
+    await pick(w, 'NAS über WebDAV')
+    await w.get('input[type="text"]').setValue('Fotoarchiv')
+
+    await button(w, 'Ändern').trigger('click')
+    expect(w.findAll('.kinds .kind')).toHaveLength(4)
+    // Die zuletzt gewaehlte Art bleibt markiert — Orientierung beim Zurueckgehen.
+    expect(w.get('.kind.checked').text()).toContain('NAS über WebDAV')
+
+    await pick(w, 'Nextcloud-Album')
+    expect(w.get('.kind-chosen').text()).toContain('Nextcloud-Album')
+    expect((w.get('input[type="text"]').element as HTMLInputElement).value).toBe('Fotoarchiv')
+  })
+
+  it('fuehrt auch beim erneuten Tipp auf dieselbe Art weiter', async () => {
+    // Ein `change` kaeme bei einem schon gewaehlten Radiofeld nicht — dann
+    // bliebe man in Schritt 1 haengen.
+    const w = fresh()
+    await pick(w, 'Postfach')
+    await button(w, 'Ändern').trigger('click')
+    await pick(w, 'Postfach')
+    expect(w.get('.kind-chosen').text()).toContain('Postfach')
+  })
+
+  it('beginnt das Formular oben, nicht in der alten Scrollposition', async () => {
+    const w = fresh()
+    const rumpf = w.get('.body').element as HTMLElement
+    rumpf.scrollTop = 300
+    await pick(w, 'Postfach')
+    expect(rumpf.scrollTop).toBe(0)
+  })
+
+  it('verwirft die Rueckmeldung der vorigen Art', async () => {
+    // Sonst stuende „Verbindung erfolgreich" vom NAS unter dem Postfach.
+    vi.spyOn(api, 'testSource').mockResolvedValue(null)
+    const w = fresh()
+    await pick(w, 'NAS über WebDAV')
+    await w.get('input[type="text"]').setValue('NAS')
+    await w.get('input[type="url"]').setValue('https://nas.local/dav')
+    await button(w, 'Verbindung testen').trigger('click')
+    await flush()
+    await w.vm.$nextTick()
+    expect(w.find('.foot .result .ok').exists()).toBe(true)
+
+    await button(w, 'Ändern').trigger('click')
+    await pick(w, 'Postfach')
+    expect(w.find('.foot .result .ok').exists()).toBe(false)
+  })
+
+  it('ueberspringt die Auswahl beim Bearbeiten', () => {
+    // Die Art ist dann gesperrt; es gibt nichts zu waehlen und nichts zu aendern.
+    const w = form('webDav')
+    expect(w.find('.kinds').exists()).toBe(false)
+    expect(w.find('.kind-chosen').exists()).toBe(false)
+    expect(w.find('input[type="url"]').exists()).toBe(true)
+  })
+
+  it('beginnt nach dem Bearbeiten beim Anlegen wieder in Schritt 1', async () => {
+    // Der Bereich kann denselben Dialog weiterverwenden; dann darf das
+    // naechste Anlegen nicht im Formular der zuletzt bearbeiteten Quelle landen.
+    const w = form('webDav')
+    await w.setProps({ source: null })
+    expect(w.findAll('.kinds .kind')).toHaveLength(4)
   })
 })

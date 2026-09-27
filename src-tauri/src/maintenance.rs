@@ -385,6 +385,8 @@ pub struct DiagnosticInput<'a> {
     pub storage: &'a StorageBreakdown,
     pub check: &'a DatabaseCheck,
     pub fetch_log: &'a [crate::mail::log::FetchLogEntry],
+    /// Letzter Abgleich je Quellen-Id — seit dem Start der App.
+    pub last_syncs: &'a std::collections::HashMap<String, crate::sync::SyncReport>,
     pub cache_bytes: u64,
     pub cache_max_bytes: u64,
 }
@@ -407,6 +409,26 @@ fn kurzfassung(text: &str) -> String {
     }
     let gekuerzt: String = erste.chars().take(ERROR_SNIPPET).collect();
     format!("{gekuerzt}…")
+}
+
+/// Ersetzt Verweise in einem Fehlertext durch „<Verweis>" (F11).
+///
+/// Fehler des SAF-Plugins nennen die URI der Datei, und darin steht der
+/// Pfad samt Dateiname; Netzfehler nennen die Adresse und damit den Server.
+/// Beides darf nicht ins Ticket, der Rest der Meldung aber schon — gerade er
+/// sagt, *warum* es scheiterte.
+fn ohne_verweise(text: &str) -> String {
+    const MARKEN: [&str; 5] = ["content://", "file://", "http://", "https://", "/storage/"];
+    text.split(' ')
+        .map(|wort| {
+            if MARKEN.iter().any(|m| wort.contains(m)) {
+                "<Verweis>"
+            } else {
+                wort
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Ersetzt eine Mailadresse durch „Absender A", „Absender B", … (F11).
@@ -500,6 +522,41 @@ pub fn diagnostic_report(input: &DiagnosticInput<'_>) -> String {
             s.enabled,
             s.sync_interval_minutes
         );
+        // Anzahl statt Namen: die Unterordner heissen wie das, was darin liegt.
+        if !s.subfolders.is_empty() || s.min_width > 0 || s.min_height > 0 {
+            let _ = writeln!(
+                out,
+                "   Filter: {} Unterordner, mindestens {}x{}",
+                s.subfolders.len(),
+                s.min_width,
+                s.min_height
+            );
+        }
+        if let Some(r) = input.last_syncs.get(&s.id) {
+            match &r.error {
+                Some(err) => {
+                    let _ = writeln!(
+                        out,
+                        "   letzter Abgleich FEHLER: {}",
+                        ohne_verweise(&kurzfassung(err))
+                    );
+                }
+                None => {
+                    let _ = writeln!(
+                        out,
+                        "   letzter Abgleich: neu {}, geaendert {}, unveraendert {}, uebersprungen {}, fehlgeschlagen {}",
+                        r.added, r.updated, r.unchanged, r.skipped, r.failed
+                    );
+                }
+            }
+            if let Some(grund) = &r.first_failure {
+                let _ = writeln!(
+                    out,
+                    "   erster Fehlschlag: {}",
+                    ohne_verweise(&kurzfassung(grund))
+                );
+            }
+        }
     }
     let _ = writeln!(out);
 
@@ -744,6 +801,16 @@ mod tests {
             },
         ];
 
+        let mut ordner = crate::sync::SyncReport::for_source("s1");
+        ordner.unchanged = 3;
+        for _ in 0..1387 {
+            ordner.fail(
+                "Lesen",
+                "Datei nicht lesbar: FsUri { uri: \"content://geheim/IMG-1.jpg\" } permission denied",
+            );
+        }
+        let letzte = std::collections::HashMap::from([("s1".to_string(), ordner)]);
+
         diagnostic_report(&DiagnosticInput {
             app_version: "0.1.0",
             android_release: "15",
@@ -753,6 +820,7 @@ mod tests {
             storage: &storage,
             check: &check,
             fetch_log: &log,
+            last_syncs: &letzte,
             cache_bytes: 453_000_000,
             cache_max_bytes: 2_147_483_648,
         })
@@ -765,17 +833,27 @@ mod tests {
         let b = beispielbericht();
         for verboten in [
             "rahmen@example.org",  // Benutzername des Postfachs
-            "tochter@example.org",     // Absender
-            "oma@example.org",      // Absender
-            "imap.example.org",         // Servername
-            "content://geheim",     // Pfad der lokalen Quelle
-            "2026-0607_Urlaub", // Name der Quelle
+            "tochter@example.org", // Absender
+            "oma@example.org",     // Absender
+            "imap.example.org",    // Servername
+            "content://geheim",    // Pfad der lokalen Quelle
+            "IMG-1.jpg",           // Dateiname aus einem Fehlschlag
+            "2026-0607_Urlaub",    // Name der Quelle
         ] {
             assert!(
                 !b.contains(verboten),
                 "„{verboten}\" darf nicht im Bericht stehen:\n{b}"
             );
         }
+    }
+
+    #[test]
+    fn verweise_verschwinden_die_meldung_bleibt() {
+        assert_eq!(
+            ohne_verweise("error sending request for url (https://nas.local/Fotos/a.jpg): timeout"),
+            "error sending request for url <Verweis> timeout"
+        );
+        assert_eq!(ohne_verweise("No such file"), "No such file");
     }
 
     #[test]
@@ -818,7 +896,10 @@ Sitzung 4711-abc"), "Abgelehnt");
             "Android      15",       // Systemfassung
             "Postfach (auch gelesene: true", // Einstellung, die Verhalten erklaert
             "FEHLER: Anmeldung abgelehnt",   // der eigentliche Vorfall
-            "nie gezeigt       544", // Bestand
+            "nie gezeigt       544",         // Bestand
+            "unveraendert 3, uebersprungen 0, fehlgeschlagen 1387", // warum der Ordner leer bleibt ...
+            "erster Fehlschlag: Lesen: Datei nicht lesbar",         // ... und woran es lag
+            "permission denied",
         ] {
             assert!(b.contains(noetig), "„{noetig}\" fehlt im Bericht:\n{b}");
         }
@@ -1048,7 +1129,9 @@ Sitzung 4711-abc"), "Abgelehnt");
         // Zwei Laeufe muessen dasselbe melden -- sonst sieht der Bericht nach
         // Veraenderung aus, wo keine ist.
         let idx = index_mit(vec![]);
-        let c = check_database(&idx, &["z".into(), "a".into(), "m".into()], &[], &|_| eins());
+        let c = check_database(&idx, &["z".into(), "a".into(), "m".into()], &[], &|_| {
+            eins()
+        });
         assert_eq!(c.orphan_files, vec!["a", "m", "z"]);
     }
 
@@ -1133,7 +1216,14 @@ Sitzung 4711-abc"), "Abgelehnt");
     #[test]
     fn bestenlisten_enden_bei_zehn() {
         let entries: Vec<CacheEntry> = (0..25)
-            .map(|i| bild(&format!("i{i}"), &format!("{i:02}.jpg"), i + 1, Some(i as i64)))
+            .map(|i| {
+                bild(
+                    &format!("i{i}"),
+                    &format!("{i:02}.jpg"),
+                    i + 1,
+                    Some(i as i64),
+                )
+            })
             .collect();
         let s = playback_stats(&index_mit(entries), &alles, 0, 0);
         assert_eq!(s.most_shown.len(), TOP_LIMIT);

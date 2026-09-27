@@ -44,6 +44,7 @@ const REPORT: SyncReport = {
   evicted: 0,
   truncated: false,
   error: null,
+  firstFailure: null,
 }
 
 let store: ReturnType<typeof useConfigStore>
@@ -76,6 +77,33 @@ describe('SourcesPane', () => {
 
     const meldung = w.get('.card .ss-feedback .error')
     expect(meldung.text()).toContain('Anmeldung abgelehnt')
+  })
+
+  it('meldet einen Lauf ohne abgelegtes Bild als Fehler mit Grund (E-69)', async () => {
+    vi.spyOn(store, 'syncSource').mockResolvedValue({
+      ...REPORT,
+      added: 0,
+      updated: 0,
+      failed: 1387,
+      firstFailure: 'Unvollstaendig: 474702 von 474700 Bytes',
+    })
+    const w = pane()
+    await w.get('.action-sync').trigger('click')
+    await flushPromises()
+
+    expect(w.get('.card .ss-feedback .error').text()).toBe(
+      '1387 fehlgeschlagen — Unvollstaendig: 474702 von 474700 Bytes',
+    )
+  })
+
+  it('meldet einzelne Fehlschlaege neben abgelegten Bildern weiter als Ergebnis', async () => {
+    // Drei kaputte Dateien unter hundert guten sind kein gescheiterter Abgleich.
+    vi.spyOn(store, 'syncSource').mockResolvedValue({ ...REPORT, failed: 3, firstFailure: 'Dekodieren: x' })
+    const w = pane()
+    await w.get('.action-sync').trigger('click')
+    await flushPromises()
+
+    expect(w.get('.card .ss-feedback .ok').text()).toContain('3 fehlgeschlagen')
   })
 
   it('fragt vor dem Entfernen im eigenen Dialog und nennt die Quelle', async () => {
