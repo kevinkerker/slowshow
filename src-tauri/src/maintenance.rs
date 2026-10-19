@@ -523,11 +523,19 @@ pub fn diagnostic_report(input: &DiagnosticInput<'_>) -> String {
             s.sync_interval_minutes
         );
         // Anzahl statt Namen: die Unterordner heissen wie das, was darin liegt.
-        if !s.subfolders.is_empty() || s.min_width > 0 || s.min_height > 0 {
+        let gefiltert = !s.subfolders.is_empty()
+            || !s.excluded_subfolders.is_empty()
+            || !s.include_root()
+            || !s.include_new_subfolders();
+        if gefiltert || s.min_width > 0 || s.min_height > 0 {
+            let ja = |b: bool| if b { "ja" } else { "nein" };
             let _ = writeln!(
                 out,
-                "   Filter: {} Unterordner, mindestens {}x{}",
+                "   Filter: {} Unterordner an, {} aus, Hauptordner {}, neue automatisch {}, mindestens {}x{}",
                 s.subfolders.len(),
+                s.excluded_subfolders.len(),
+                ja(s.include_root()),
+                ja(s.include_new_subfolders()),
                 s.min_width,
                 s.min_height
             );
@@ -548,6 +556,13 @@ pub fn diagnostic_report(input: &DiagnosticInput<'_>) -> String {
                         r.added, r.updated, r.unchanged, r.skipped, r.failed
                     );
                 }
+            }
+            if !r.missing_subfolders.is_empty() {
+                let _ = writeln!(
+                    out,
+                    "   Unterordner nicht gefunden: {}",
+                    r.missing_subfolders.len()
+                );
             }
             if let Some(grund) = &r.first_failure {
                 let _ = writeln!(
@@ -704,6 +719,9 @@ mod tests {
                 },
                 enabled: true,
                 subfolders: vec![],
+                excluded_subfolders: vec![],
+                include_root: None,
+                include_new_subfolders: None,
                 min_width: 0,
                 min_height: 0,
                 sync_interval_minutes: 360,
@@ -727,6 +745,9 @@ mod tests {
                 },
                 enabled: true,
                 subfolders: vec![],
+                excluded_subfolders: vec![],
+                include_root: None,
+                include_new_subfolders: None,
                 min_width: 0,
                 min_height: 0,
                 sync_interval_minutes: 15,
@@ -801,8 +822,10 @@ mod tests {
             },
         ];
 
+        cfg.sources[0].excluded_subfolders = vec!["Sent".into(), "Private".into()];
         let mut ordner = crate::sync::SyncReport::for_source("s1");
         ordner.unchanged = 3;
+        ordner.missing_subfolders = vec!["Geheimer Urlaub".into()];
         for _ in 0..1387 {
             ordner.fail(
                 "Lesen",
@@ -838,6 +861,8 @@ mod tests {
             "imap.example.org",    // Servername
             "content://geheim",    // Pfad der lokalen Quelle
             "IMG-1.jpg",           // Dateiname aus einem Fehlschlag
+            "Geheimer Urlaub",     // Name eines fehlenden Unterordners
+            "Sent",                // Name eines abgeschalteten Unterordners
             "2026-0607_Urlaub",    // Name der Quelle
         ] {
             assert!(
@@ -900,6 +925,8 @@ Sitzung 4711-abc"), "Abgelehnt");
             "unveraendert 3, uebersprungen 0, fehlgeschlagen 1387", // warum der Ordner leer bleibt ...
             "erster Fehlschlag: Lesen: Datei nicht lesbar",         // ... und woran es lag
             "permission denied",
+            "Filter: 0 Unterordner an, 2 aus, Hauptordner ja, neue automatisch ja", // E-70
+            "Unterordner nicht gefunden: 1",
         ] {
             assert!(b.contains(noetig), "„{noetig}\" fehlt im Bericht:\n{b}");
         }

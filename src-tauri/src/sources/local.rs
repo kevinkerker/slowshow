@@ -19,7 +19,7 @@
 //! jetzt über denselben Weg wie NAS und Nextcloud: listen, herunterladen,
 //! dekodieren, ablegen — alles im Rust-Prozess.
 
-use super::{DavError, Listing, RemoteFile};
+use super::{DavError, FolderFilter, Listing, RemoteFile, SubfolderEntry};
 
 /// Obergrenzen wie bei entfernten Quellen.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -38,13 +38,33 @@ pub fn root_unreadable(cause: &str) -> DavError {
     ))
 }
 
+/// Meldung, wenn Android dem Systemdienst „Externer Speicher“ die Bilder
+/// sperrt (E-71).
+pub const SYSTEM_STORAGE_BLOCKED: &str =
+    "Android sperrt dem Systemdienst „Externer Speicher“ den Zugriff auf Bilder — in den Einstellungen unter „Spezieller App-Zugriff“ → „Zugriff auf alle Dateien“ die System-Apps einblenden, „Externer Speicher“ erlauben, dann neu laden";
+
+/// Fehler fuer eine Datei, die sich nicht lesen laesst (E-71).
+///
+/// Ab Android 11 oeffnet der Dienst hinter SAF (`com.android.externalstorage`)
+/// Bilder ueber den MediaProvider. Fehlt dem Dienst dort der Allzugriff,
+/// scheitert jede Datei mit „com.android.externalstorage has no access to
+/// content://media/…“ — gemessen an einem Testgeraet, 1387 von 1387 in zwei
+/// Ordnern, obwohl das Auflisten ging. Die App kann das nicht beheben, nur
+/// den Weg in die Einstellungen nennen; als `Access` beendet es den Lauf.
+pub fn read_failed(cause: &str) -> DavError {
+    if cause.contains("com.android.externalstorage has no access") {
+        DavError::Access(SYSTEM_STORAGE_BLOCKED.into())
+    } else {
+        DavError::Url(format!("Datei nicht lesbar: {cause}"))
+    }
+}
+
 #[cfg(target_os = "android")]
 mod imp {
     use super::*;
     use crate::decode::{classify, FileClass};
-    // Absolut, nicht ueber `super`: dieses Modul liegt in `sources::local::imp`,
-    // `super` waere also `sources::local` und nicht `sources`.
-    use crate::sources::{file_allowed, folder_allowed};
+    use crate::sources::filter::child_path;
+    use std::collections::HashSet;
     use tauri::AppHandle;
     use tauri_plugin_android_fs::{AndroidFsExt, Entry, FsUri};
 
@@ -74,11 +94,19 @@ mod imp {
             .await
         }
 
-        pub async fn list(&self, subfolders: &[String]) -> Result<Listing, DavError> {
+        pub async fn list(&self, filter: &FolderFilter) -> Result<Listing, DavError> {
             let app = self.app.clone();
             let root = self.root.clone();
-            let subfolders = subfolders.to_vec();
-            blocking(move || walk(&app, &root, &subfolders)).await
+            let filter = filter.clone();
+            blocking(move || walk(&app, &root, &filter)).await
+        }
+
+        /// Die Unterordner eines Ordners, eine Ebene (E-70).
+        pub async fn subfolders(&self, path: &str) -> Result<Vec<SubfolderEntry>, DavError> {
+            let app = self.app.clone();
+            let root = self.root.clone();
+            let path = path.to_string();
+            blocking(move || list_level(&app, &root, &path)).await
         }
 
         pub async fn fetch(&self, file: &RemoteFile) -> Result<Vec<u8>, DavError> {
@@ -93,7 +121,7 @@ mod imp {
                     .map_err(|e| DavError::Url(format!("SAF-Verweis unlesbar: {e}")))?;
                 app.android_fs()
                     .read(&uri)
-                    .map_err(|e| DavError::Url(format!("Datei nicht lesbar: {e}")))
+                    .map_err(|e| super::read_failed(&e.to_string()))
             })
             .await
         }
@@ -113,10 +141,64 @@ mod imp {
             .map_err(|e| DavError::Url(format!("SAF-Aufruf abgebrochen: {e}")))?
     }
 
+    /// Findet einen Ordner unterhalb der Freigabe ueber seinen Pfad.
+    ///
+    /// SAF kennt keine Pfade, nur Verweise; der Weg geht deshalb Name fuer
+    /// Name von der Wurzel hinab.
+    fn resolve(app: &AppHandle, root: &FsUri, path: &str) -> Result<FsUri, DavError> {
+        let fs = app.android_fs();
+        let mut current = root.clone();
+        for segment in path.split('/').filter(|s| !s.is_empty()) {
+            let entries = fs
+                .read_dir(&current)
+                .map_err(|e| super::root_unreadable(&e.to_string()))?;
+            current = entries
+                .into_iter()
+                .find_map(|e| match e {
+                    Entry::Dir { uri, name, .. } if name == segment => Some(uri),
+                    _ => None,
+                })
+                .ok_or_else(|| DavError::Url(format!("Ordner „{path}“ nicht gefunden")))?;
+        }
+        Ok(current)
+    }
+
+    fn list_level(app: &AppHandle, root: &FsUri, path: &str) -> Result<Vec<SubfolderEntry>, DavError> {
+        let fs = app.android_fs();
+        let dir = resolve(app, root, path)?;
+        let entries = fs
+            .read_dir(&dir)
+            .map_err(|e| super::root_unreadable(&e.to_string()))?;
+        let mut out = Vec::new();
+        for entry in entries {
+            let Entry::Dir { uri, name, .. } = entry else {
+                continue;
+            };
+            // Ein unlesbarer Unterordner erscheint ohne Vermerke, statt die
+            // ganze Liste scheitern zu lassen.
+            let inner: Vec<(String, bool)> = fs
+                .read_dir(&uri)
+                .map(|c| {
+                    c.into_iter()
+                        .map(|e| (e.name().to_string(), matches!(e, Entry::Dir { .. })))
+                        .collect()
+                })
+                .unwrap_or_default();
+            out.push(SubfolderEntry::from_children(
+                &name,
+                &child_path(path, &name),
+                inner.iter().map(|(n, d)| (n.as_str(), *d)),
+            ));
+        }
+        Ok(out)
+    }
+
     /// Breitensuche durch den freigegebenen Ordner.
-    fn walk(app: &AppHandle, root: &FsUri, subfolders: &[String]) -> Result<Listing, DavError> {
+    fn walk(app: &AppHandle, root: &FsUri, filter: &FolderFilter) -> Result<Listing, DavError> {
         let fs = app.android_fs();
         let mut result = Listing::default();
+        // Betretene Unterordner — fuer die fehlenden (E-70).
+        let mut seen_dirs = HashSet::new();
         let mut queue: Vec<(FsUri, String, usize)> = vec![(root.clone(), String::new(), 0)];
 
         while let Some((uri, prefix, depth)) = queue.pop() {
@@ -149,9 +231,10 @@ mod imp {
                             result.truncated = true;
                             continue;
                         }
-                        if !folder_allowed(&rel, subfolders) {
+                        if !filter.descend(&rel) {
                             continue;
                         }
+                        seen_dirs.insert(rel.clone());
                         queue.push((uri, rel, depth + 1));
                     }
                     Entry::File {
@@ -160,7 +243,7 @@ mod imp {
                         len,
                         ..
                     } => {
-                        if !file_allowed(&rel, subfolders) {
+                        if !filter.file_allowed(&rel) {
                             continue;
                         }
                         match classify(&name) {
@@ -188,6 +271,9 @@ mod imp {
             }
         }
 
+        if !result.truncated {
+            result.missing_subfolders = filter.missing(&seen_dirs);
+        }
         Ok(result)
     }
 
@@ -217,7 +303,11 @@ mod imp {
             Err(DavError::Url("SAF nicht verfügbar".into()))
         }
 
-        pub async fn list(&self, _subfolders: &[String]) -> Result<Listing, DavError> {
+        pub async fn list(&self, _filter: &FolderFilter) -> Result<Listing, DavError> {
+            Err(DavError::Url("SAF nicht verfügbar".into()))
+        }
+
+        pub async fn subfolders(&self, _path: &str) -> Result<Vec<SubfolderEntry>, DavError> {
             Err(DavError::Url("SAF nicht verfügbar".into()))
         }
 
@@ -242,6 +332,22 @@ mod tests {
         assert!(text.contains("Ordnerfreigabe fehlt"), "{text}");
         assert!(text.contains("Bearbeiten"), "der Weg zur Behebung steht dabei");
         assert!(text.contains("No directory or permission"), "die Ursache bleibt lesbar");
+    }
+
+    #[test]
+    fn gesperrter_speicherdienst_nennt_den_weg_in_die_einstellungen_e_71() {
+        // Wortlaut vom Testgeraet, wie ihn das Plugin durchreicht.
+        let e = read_failed(
+            "com.android.externalstorage has no access to content://media/external_primary/images/media/76",
+        );
+        assert!(matches!(e, DavError::Access(_)), "beendet den Lauf");
+        let text = e.to_string();
+        assert!(text.contains("Zugriff auf alle Dateien"), "{text}");
+        assert!(!text.contains("content://"), "keine Adresse in der Meldung");
+
+        let e = read_failed("permission denied");
+        assert!(matches!(e, DavError::Url(_)), "andere Fehler bleiben Einzelfehler");
+        assert!(e.to_string().contains("Datei nicht lesbar: permission denied"));
     }
 
     #[test]

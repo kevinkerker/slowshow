@@ -196,8 +196,17 @@ export interface Source {
   kind: SourceKind
   /** Fließt die Quelle in die Diashow ein? (FA-25) */
   enabled: boolean
-  /** Nur diese Unterordner (FA-29). */
+  /** Ausdrücklich angeschaltete Unterordner (FA-29, E-70). */
   subfolders: string[]
+  /** Ausdrücklich abgeschaltete Unterordner (E-70). */
+  excludedSubfolders: string[]
+  /**
+   * Bilder direkt im gewählten Ordner (E-70). `null` nur bei Quellen von vor
+   * E-70; die Auflösung steht in `selectionOf` (src/lib/subfolders.ts).
+   */
+  includeRoot: boolean | null
+  /** Neue Unterordner automatisch aufnehmen (E-70). `null` wie oben. */
+  includeNewSubfolders: boolean | null
   minWidth: number
   minHeight: number
   syncIntervalMinutes: number
@@ -400,6 +409,19 @@ export interface SyncReport {
   error: string | null
   /** Grund des ersten Fehlschlags samt Schritt, etwa „Lesen: …". */
   firstFailure: string | null
+  /** Angeschaltete Unterordner, die es an der Quelle nicht gibt (E-70). */
+  missingSubfolders: string[]
+}
+
+/** Ein Unterordner für die Auswahl im Quellendialog (E-70). */
+export interface SubfolderEntry {
+  name: string
+  /** Relativ zum gewählten Ordner, mit `/` getrennt. */
+  path: string
+  /** Liegt eine `.nomedia` darin (bei WhatsApp: Sent, Private)? */
+  nomedia: boolean
+  /** Hat er selbst Unterordner? */
+  hasChildren: boolean
 }
 
 export interface Album {

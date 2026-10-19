@@ -102,7 +102,11 @@
     "syncListing": "Scanning source …",
     "syncSkipped": "{n} skipped",
     "syncFailedCount": "{n} failed",
-    "syncAllFailed": "{n} failed — {reason}"
+    "syncAllFailed": "{n} failed — {reason}",
+    "subfoldersExcluded": "1 folder excluded | {n} folders excluded",
+    "subfoldersSelected": "1 folder selected | {n} folders selected",
+    "subfoldersMissing": "Subfolder {names} not found",
+    "quoted": "“{name}”"
   },
   "sourceForm": {
     "titleAdd": "Add source",
@@ -161,9 +165,8 @@
     "usePreviewApiHint": "Saves bandwidth and makes HEIC photos usable.",
     "allowInsecureTls": "Accept self-signed certificate",
     "allowInsecureTlsHint": "Only sensible on your own home network.",
-    "subfolders": "Only these subfolders",
-    "subfoldersPlaceholder": "e.g. Holidays, Family/2025",
-    "subfoldersHint": "Separate several with commas. Empty = all.",
+    "subfolders": "Which folders?",
+    "subfoldersHint": "Folders switched off don’t appear in the slideshow.",
     "minResolution": "Minimum resolution",
     "minResolutionHint": "Smaller photos are skipped. 0 = no filter.",
     "syncInterval": "Sync every",
@@ -200,7 +203,22 @@
     "resyncBody": "The frame scans every message in the folder — with a full mailbox this takes several minutes. The slideshow keeps running and you can cancel at any time.",
     "resyncRunning": "{done} of {total} messages checked · {added} new",
     "resyncCancel": "Cancel",
-    "resyncDone": "Resync finished · {n} new photos"
+    "resyncDone": "Resync finished · {n} new photos",
+    "subfoldersRoot": "Photos directly in “{name}”",
+    "subfoldersLoad": "Show subfolders",
+    "subfoldersLoading": "Reading subfolders …",
+    "subfoldersError": "Subfolders not readable: {error}",
+    "subfoldersRetry": "Try again",
+    "subfoldersNone": "No subfolders.",
+    "subfoldersNeedFolder": "Choose a folder first.",
+    "subfoldersNeedUrl": "Enter address and credentials first.",
+    "subfoldersNomedia": "hidden (.nomedia)",
+    "subfoldersExpand": "Expand “{name}”",
+    "subfoldersCollapse": "Collapse “{name}”",
+    "subfoldersMissing": "not found",
+    "subfoldersForget": "Forget “{name}”",
+    "includeNewSubfolders": "Add new subfolders automatically",
+    "includeNewSubfoldersHint": "Folders added later appear in the slideshow without further action."
   },
   "show": {
     "title": "Slideshow",

@@ -21,6 +21,7 @@ import type {
   MqttStatus,
   Slide,
   Source,
+  SubfolderEntry,
   SyncReport,
   PlaybackStats,
   FetchLogEntry,
@@ -210,6 +211,17 @@ export const removeSource = (id: string): Promise<AppConfig> => invoke('remove_s
  */
 export const testSource = (source: Source, password: string): Promise<number | null> =>
   invoke('test_source', { source, password })
+
+/**
+ * Die Unterordner eines Ordners der Quelle, eine Ebene (E-70). `path` ist
+ * relativ zum gewählten Ordner, `''` für ihn selbst. Nimmt den Entwurf aus
+ * dem Dialog; ein leeres Passwort heißt „das gespeicherte".
+ */
+export const listSubfolders = (
+  source: Source,
+  password: string,
+  path: string,
+): Promise<SubfolderEntry[]> => invoke('list_subfolders', { source, password, path })
 
 /**
  * Gleicht ein Postfach vollständig neu ab (Wartung F8).

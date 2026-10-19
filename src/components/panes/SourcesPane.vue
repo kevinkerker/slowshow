@@ -188,6 +188,7 @@ function describe(report: SyncReport | null): { text: string; failed: boolean } 
         :syncing="store.isSyncing(source.id)"
         :progress="store.progressFor(source.id)"
         :error="store.errorFor(source.id)"
+        :missing="store.missingFor(source.id)"
         :feedback="feedbacks.get(source.id)?.feedback.value ?? null"
         @toggle="(v) => toggle(source, v)"
         @edit="openEdit(source)"

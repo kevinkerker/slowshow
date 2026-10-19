@@ -52,25 +52,59 @@ const KINDS: Record<string, SourceKind> = {
   },
 }
 
-function card(kind: keyof typeof KINDS, photoCount = 12, lastSync: number | null = null) {
+function card(
+  kind: keyof typeof KINDS,
+  photoCount = 12,
+  lastSync: number | null = null,
+  extra: Partial<Source> = {},
+  missing: string[] = [],
+) {
   const source: Source = {
     id: 'q1',
     name: 'Testquelle',
     kind: KINDS[kind],
     enabled: true,
     subfolders: [],
+    excludedSubfolders: [],
+    includeRoot: null,
+    includeNewSubfolders: null,
     minWidth: 0,
     minHeight: 0,
     syncIntervalMinutes: 360,
     lastSync,
+    ...extra,
   }
   return mount(SourceCard, {
-    props: { source, photoCount, syncing: false, progress: null },
+    props: { source, photoCount, syncing: false, progress: null, missing },
     global: { plugins: [i18n] },
   })
 }
 
 describe('SourceCard', () => {
+  it('nennt die ausgeschlossenen Unterordner in der Statuszeile (E-70)', () => {
+    const text = card('local', 111, null, {
+      excludedSubfolders: ['Sent', 'Private'],
+      includeRoot: true,
+      includeNewSubfolders: true,
+    }).text()
+    expect(text).toContain('111 Fotos · Lokaler Ordner · 2 Ordner ausgeschlossen')
+  })
+
+  it('nennt bei einem alten Filter die ausgewählten Ordner (E-70)', () => {
+    expect(card('local', 5, null, { subfolders: ['Urlaub'] }).text()).toContain('1 Ordner ausgewählt')
+  })
+
+  it('sagt ohne Filter nichts über Unterordner', () => {
+    expect(card('local').text()).not.toContain('Ordner ausg')
+  })
+
+  it('meldet fehlende Unterordner leise unter der Statuszeile (E-70)', () => {
+    const w = card('local', 0, null, { subfolders: ['Urlaub'] }, ['Urlaub'])
+    const hint = w.get('.status-hint')
+    expect(hint.text()).toBe('Unterordner „Urlaub“ nicht gefunden')
+    expect(w.find('.status-error').exists(), 'kein Fehlerrot: die übrigen Bilder laufen').toBe(false)
+  })
+
   it('nennt das Postfach ein Postfach', () => {
     const text = card('mail').text()
     expect(text).toContain('Postfach')
@@ -155,6 +189,9 @@ describe('SourceCard: Fehler des letzten Laufs', () => {
     kind: KINDS.local,
     enabled: true,
     subfolders: [],
+    excludedSubfolders: [],
+    includeRoot: null,
+    includeNewSubfolders: null,
     minWidth: 0,
     minHeight: 0,
     syncIntervalMinutes: 360,
@@ -204,6 +241,9 @@ describe('SourceCard — Rückmeldung', () => {
           kind: KINDS.webDav,
           enabled: true,
           subfolders: [],
+          excludedSubfolders: [],
+          includeRoot: null,
+          includeNewSubfolders: null,
           minWidth: 0,
           minHeight: 0,
           syncIntervalMinutes: 360,

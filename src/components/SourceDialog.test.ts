@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import SourceDialog from './SourceDialog.vue'
 import { CANCEL, confirmRequest, settle } from '@/composables/useConfirm'
 import { i18n } from '@/lib/i18n'
@@ -32,6 +32,8 @@ beforeEach(() => {
   vi.spyOn(api, 'lastFetch').mockResolvedValue(null)
   vi.spyOn(api, 'fetchLog').mockResolvedValue([])
   vi.spyOn(api, 'onResyncProgress').mockResolvedValue(() => {})
+  // Der lokale Ordner liest seine Unterordner sofort (E-70).
+  vi.spyOn(api, 'listSubfolders').mockResolvedValue([])
 })
 
 // Eine Rueckfrage, die ein Test offen laesst, bliebe sonst fuer den naechsten
@@ -67,6 +69,9 @@ const BASE: Omit<Source, 'kind'> = {
   name: 'Testquelle',
   enabled: true,
   subfolders: [],
+  excludedSubfolders: [],
+  includeRoot: null,
+  includeNewSubfolders: null,
   minWidth: 0,
   minHeight: 0,
   syncIntervalMinutes: 360,
@@ -147,16 +152,46 @@ describe('SourceDialog — Felder je Quellenart', () => {
   it('zeigt beim Postfach keine Unterordner-Auswahl', () => {
     // Der Abruf setzt `subfolders` fest auf leer (mail/sync.rs) — ein Feld,
     // das nichts bewirkt, ist schlimmer als keines.
-    expect(form('mail').text()).not.toContain('Nur diese Unterordner')
-    expect(form('webDav').text()).toContain('Nur diese Unterordner')
+    expect(form('mail').text()).not.toContain('Welche Ordner?')
+    expect(form('webDav').text()).toContain('Welche Ordner?')
   })
 
-  it('kennzeichnet den Unterordner-Platzhalter als Beispiel (E-68)', () => {
-    // Ohne „z. B." hielt ein Tester den Platzhalter fuer einen eingetragenen
-    // Wert, der sich nicht loeschen liess — das Feld war leer.
-    const input = form('local').find('input[placeholder*="Urlaub"]')
-    expect(input.attributes('placeholder')).toBe('z. B. Urlaub, Familie/2025')
-    expect((input.element as HTMLInputElement).value).toBe('')
+  it('speichert abgeschaltete Unterordner als Ausschluss (E-70)', async () => {
+    vi.mocked(api.listSubfolders).mockResolvedValue([
+      { name: 'Sent', path: 'Sent', nomedia: true, hasChildren: false },
+      { name: 'Status', path: 'Status', nomedia: false, hasChildren: false },
+    ])
+    const w = form('local')
+    await flushPromises()
+
+    // Beim Bearbeiten bleibt `.nomedia` angeschaltet: eine bestehende Quelle
+    // soll sich beim bloßen Öffnen nicht ändern.
+    const sent = w.get('[aria-label="Sent"]')
+    expect(sent.attributes('aria-checked')).toBe('true')
+    expect(w.text()).toContain('versteckt (.nomedia)')
+
+    await sent.trigger('click')
+    await button(w, 'Speichern').trigger('click')
+
+    const [saved] = w.emitted('save')![0] as [Source]
+    expect(saved.excludedSubfolders).toEqual(['Sent'])
+    expect(saved.subfolders).toEqual([])
+    expect(saved.includeRoot).toBe(true)
+    expect(saved.includeNewSubfolders).toBe(true)
+  })
+
+  it('übernimmt einen alten Filter als „nur diese“ (FA-29, E-70)', async () => {
+    const w = mount(SourceDialog, {
+      props: { source: { ...BASE, subfolders: ['Urlaub'], kind: KINDS.local } },
+      global: { plugins: [i18n] },
+    })
+    await flushPromises()
+    await button(w, 'Speichern').trigger('click')
+
+    const [saved] = w.emitted('save')![0] as [Source]
+    expect(saved.subfolders).toEqual(['Urlaub'])
+    expect(saved.includeRoot).toBe(false)
+    expect(saved.includeNewSubfolders).toBe(false)
   })
 
   it('bietet den Abrufabstand auch beim Postfach an', () => {

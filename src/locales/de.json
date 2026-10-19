@@ -102,7 +102,11 @@
     "syncListing": "Durchsuche Quelle …",
     "syncSkipped": "{n} übersprungen",
     "syncFailedCount": "{n} fehlgeschlagen",
-    "syncAllFailed": "{n} fehlgeschlagen — {reason}"
+    "syncAllFailed": "{n} fehlgeschlagen — {reason}",
+    "subfoldersExcluded": "1 Ordner ausgeschlossen | {n} Ordner ausgeschlossen",
+    "subfoldersSelected": "1 Ordner ausgewählt | {n} Ordner ausgewählt",
+    "subfoldersMissing": "Unterordner {names} nicht gefunden",
+    "quoted": "„{name}“"
   },
   "sourceForm": {
     "titleAdd": "Quelle hinzufügen",
@@ -161,9 +165,8 @@
     "usePreviewApiHint": "Spart Datenvolumen und macht HEIC-Fotos nutzbar.",
     "allowInsecureTls": "Selbstsigniertes Zertifikat akzeptieren",
     "allowInsecureTlsHint": "Nur im eigenen Heimnetz sinnvoll.",
-    "subfolders": "Nur diese Unterordner",
-    "subfoldersPlaceholder": "z. B. Urlaub, Familie/2025",
-    "subfoldersHint": "Mehrere durch Komma trennen. Leer = alle.",
+    "subfolders": "Welche Ordner?",
+    "subfoldersHint": "Ausgeschaltete Ordner erscheinen nicht in der Diashow.",
     "minResolution": "Mindestauflösung",
     "minResolutionHint": "Kleinere Bilder werden übersprungen. 0 = kein Filter.",
     "syncInterval": "Synchronisieren alle",
@@ -200,7 +203,22 @@
     "resyncBody": "Der Rahmen sieht jede Nachricht im Ordner durch — das dauert bei einem vollen Postfach mehrere Minuten. Die Diashow läuft weiter, und du kannst jederzeit abbrechen.",
     "resyncRunning": "{done} von {total} Nachrichten geprüft · {added} neu",
     "resyncCancel": "Abbrechen",
-    "resyncDone": "Neuabgleich fertig · {n} neue Fotos"
+    "resyncDone": "Neuabgleich fertig · {n} neue Fotos",
+    "subfoldersRoot": "Bilder direkt in „{name}“",
+    "subfoldersLoad": "Unterordner anzeigen",
+    "subfoldersLoading": "Unterordner werden gelesen …",
+    "subfoldersError": "Unterordner nicht lesbar: {error}",
+    "subfoldersRetry": "Erneut versuchen",
+    "subfoldersNone": "Keine Unterordner.",
+    "subfoldersNeedFolder": "Zuerst einen Ordner wählen.",
+    "subfoldersNeedUrl": "Zuerst Adresse und Zugangsdaten eintragen.",
+    "subfoldersNomedia": "versteckt (.nomedia)",
+    "subfoldersExpand": "„{name}“ aufklappen",
+    "subfoldersCollapse": "„{name}“ zuklappen",
+    "subfoldersMissing": "nicht gefunden",
+    "subfoldersForget": "„{name}“ vergessen",
+    "includeNewSubfolders": "Neue Unterordner automatisch aufnehmen",
+    "includeNewSubfoldersHint": "Ordner, die später dazukommen, erscheinen ohne Zutun in der Diashow."
   },
   "show": {
     "title": "Diashow",

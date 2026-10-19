@@ -27,6 +27,9 @@ const NAS: Source = {
   kind: { type: 'webDav', url: 'https://nas.local/dav', username: 'k', passwordRef: 'nas', allowInsecureTls: false },
   enabled: true,
   subfolders: [],
+  excludedSubfolders: [],
+  includeRoot: null,
+  includeNewSubfolders: null,
   minWidth: 0,
   minHeight: 0,
   syncIntervalMinutes: 360,
@@ -45,6 +48,7 @@ const REPORT: SyncReport = {
   truncated: false,
   error: null,
   firstFailure: null,
+  missingSubfolders: [],
 }
 
 let store: ReturnType<typeof useConfigStore>

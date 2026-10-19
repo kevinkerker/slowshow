@@ -208,6 +208,21 @@ describe('configStore: Fortschritt mehrerer Quellen', () => {
     expect(store.errorFor('a'), 'ein gelungener Lauf raeumt auf').toBeNull()
   })
 
+  it('merkt fehlende Unterordner bis zum naechsten gelungenen Lauf (E-70)', async () => {
+    const store = await geladen()
+    const sync = rueckruf(EVENTS.sync)
+
+    sync({ payload: { sourceId: 'a', error: null, missingSubfolders: ['Urlaub'] } as SyncReport })
+    expect(store.missingFor('a')).toEqual(['Urlaub'])
+
+    // Ein gescheiterter Lauf hat nicht gelistet und weiss es nicht besser.
+    sync({ payload: { sourceId: 'a', error: 'Netzwerkfehler', missingSubfolders: [] } as unknown as SyncReport })
+    expect(store.missingFor('a')).toEqual(['Urlaub'])
+
+    sync({ payload: { sourceId: 'a', error: null, missingSubfolders: [] } as unknown as SyncReport })
+    expect(store.missingFor('a')).toEqual([])
+  })
+
   it('zeigt auch einen Hintergrundlauf als laufend an', async () => {
     // `syncing` kennt nur selbst ausgeloeste Laeufe. Ohne den Rueckfall auf den
     // Fortschritt liefe ein Abgleich des Zeitgebers unsichtbar.

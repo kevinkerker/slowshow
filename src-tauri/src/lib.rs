@@ -195,6 +195,7 @@ pub fn run() {
             commands::mqtt_status,
             commands::mqtt_reconnect,
             commands::test_source,
+            commands::list_subfolders,
             commands::list_nextcloud_albums,
             commands::sync_now,
         ])

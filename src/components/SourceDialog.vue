@@ -16,10 +16,12 @@ import SettingRow from './SettingRow.vue'
 import SsButton from './SsButton.vue'
 import SsFeedback from './SsFeedback.vue'
 import SsIconButton from './SsIconButton.vue'
+import SubfolderPicker from './SubfolderPicker.vue'
 import { CANCEL, confirm, confirmAction } from '@/composables/useConfirm'
 import { useFeedback } from '@/composables/useFeedback'
 import * as api from '@/lib/api'
 import { formatRelativeTime } from '@/lib/format'
+import { allSelected, selectionOf, type FolderSelection } from '@/lib/subfolders'
 import type { Album, FetchLogEntry, ResyncProgress, Source, SourceKind } from '@/lib/types'
 
 const props = defineProps<{
@@ -49,7 +51,14 @@ const usePreviewApi = ref(true)
 const allowInsecureTls = ref(false)
 const safUri = ref('')
 const safPath = ref('')
-const subfolders = ref('')
+/** Auswahl der Unterordner (FA-29, E-70). */
+const selection = ref<FolderSelection>(allSelected())
+/**
+ * `.nomedia`-Ordner beim ersten Lesen abschalten? Nur für einen frisch
+ * gewählten Ordner (E-70): eine bestehende Quelle soll sich beim bloßen
+ * Öffnen des Dialogs nicht ändern.
+ */
+const hideNomedia = ref(true)
 const minWidth = ref(0)
 const minHeight = ref(0)
 const syncIntervalMinutes = ref(360)
@@ -270,7 +279,8 @@ watch(
       allowInsecureTls.value = false
       safUri.value = ''
       safPath.value = ''
-      subfolders.value = ''
+      selection.value = allSelected()
+      hideNomedia.value = true
       minWidth.value = 0
       minHeight.value = 0
       syncIntervalMinutes.value = 360
@@ -280,7 +290,8 @@ watch(
     step.value = 'form'
     kind.value = source.kind.type
     name.value = source.name
-    subfolders.value = source.subfolders.join(', ')
+    selection.value = selectionOf(source)
+    hideNomedia.value = false
     minWidth.value = source.minWidth
     minHeight.value = source.minHeight
     syncIntervalMinutes.value = source.syncIntervalMinutes
@@ -344,9 +355,72 @@ async function chooseFolder() {
   }
   const picked = await pickFolder()
   if (!picked) return
+  // Ein anderer Ordner: die Entscheidungen des alten gelten nicht mehr.
+  if (picked.uri !== safUri.value) {
+    selection.value = allSelected()
+    hideNomedia.value = true
+  }
   safUri.value = picked.uri
   safPath.value = picked.name
   if (!name.value) name.value = picked.name
+}
+
+/**
+ * Entwurf der Quelle zum Auflisten der Unterordner (E-70).
+ *
+ * Ohne die Pflichtprüfung von `build()`: die Liste soll erscheinen, sobald
+ * Ordner bzw. Adresse da sind, auch wenn der Name noch fehlt — und ohne dabei
+ * eine Formularfehlermeldung zu setzen.
+ */
+const listingSource = computed<Source | null>(() => {
+  const id = props.source?.id ?? 'draft'
+  let sourceKind: SourceKind
+  if (kind.value === 'local') {
+    if (!safUri.value) return null
+    sourceKind = { type: 'local', safUri: safUri.value, displayPath: safPath.value }
+  } else if (kind.value === 'webDav') {
+    if (!url.value.trim()) return null
+    sourceKind = {
+      type: 'webDav',
+      url: url.value.trim(),
+      username: username.value.trim(),
+      passwordRef: id,
+      allowInsecureTls: allowInsecureTls.value,
+    }
+  } else {
+    return null
+  }
+  return {
+    id,
+    name: name.value.trim(),
+    kind: sourceKind,
+    enabled: true,
+    subfolders: [],
+    excludedSubfolders: [],
+    includeRoot: true,
+    includeNewSubfolders: true,
+    minWidth: 0,
+    minHeight: 0,
+    syncIntervalMinutes: syncIntervalMinutes.value,
+    lastSync: null,
+  }
+})
+
+/** Name des gewählten Ordners für „Bilder direkt in …". */
+const rootName = computed(() => {
+  if (kind.value === 'local') return safPath.value || name.value
+  const last = url.value.trim().replace(/\/+$/, '').split('/').pop() ?? ''
+  try {
+    return decodeURIComponent(last) || name.value
+  } catch {
+    return last || name.value
+  }
+})
+
+const usesSubfolders = computed(() => kind.value === 'local' || kind.value === 'webDav')
+
+function setIncludeNew(on: boolean) {
+  selection.value = { ...selection.value, includeNew: on }
 }
 
 async function loadAlbums() {
@@ -475,15 +549,17 @@ function build(): Source | null {
     }
   }
 
+  // Alben und Postfächer haben keine Unterordner: dort zählt immer alles.
+  const sel = usesSubfolders.value ? selection.value : allSelected()
   return {
     id,
     name: name.value.trim(),
     kind: sourceKind,
     enabled: props.source?.enabled ?? true,
-    subfolders: subfolders.value
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
+    subfolders: sel.include,
+    excludedSubfolders: sel.exclude,
+    includeRoot: sel.includeRoot,
+    includeNewSubfolders: sel.includeNew,
     minWidth: Math.max(0, Number(minWidth.value) || 0),
     minHeight: Math.max(0, Number(minHeight.value) || 0),
     syncIntervalMinutes: Math.max(5, Number(syncIntervalMinutes.value) || 360),
@@ -832,15 +908,35 @@ function message(e: unknown): string {
             </select>
           </SettingRow>
 
-          <!-- Filter (FA-29) -->
-          <SettingRow
-            v-if="kind === 'local' || kind === 'webDav'"
-            :label="t('sourceForm.subfolders')"
-            :hint="t('sourceForm.subfoldersHint')"
-            stacked
-          >
-            <input v-model="subfolders" type="text" :placeholder="t('sourceForm.subfoldersPlaceholder')" />
-          </SettingRow>
+          <!-- Auswahl der Unterordner (FA-29, E-70). Ersetzt das freie
+               Textfeld „Nur diese Unterordner“ und damit auch E-68. -->
+          <template v-if="usesSubfolders">
+            <SettingRow
+              :label="t('sourceForm.subfolders')"
+              :hint="t('sourceForm.subfoldersHint')"
+              stacked
+            >
+              <SubfolderPicker
+                v-model="selection"
+                :source="listingSource"
+                :password="password"
+                :root-name="rootName"
+                :hide-nomedia="hideNomedia"
+                :auto-load="kind === 'local'"
+              />
+            </SettingRow>
+
+            <SettingRow
+              :label="t('sourceForm.includeNewSubfolders')"
+              :hint="t('sourceForm.includeNewSubfoldersHint')"
+            >
+              <ToggleSwitch
+                :model-value="selection.includeNew"
+                :label="t('sourceForm.includeNewSubfolders')"
+                @update:model-value="setIncludeNew"
+              />
+            </SettingRow>
+          </template>
 
           <SettingRow :label="t('sourceForm.minResolution')" :hint="t('sourceForm.minResolutionHint')">
             <div class="dimensions">

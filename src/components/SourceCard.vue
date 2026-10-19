@@ -11,6 +11,7 @@ import SsFeedback from './SsFeedback.vue'
 import SsIconButton from './SsIconButton.vue'
 import ToggleSwitch from './ToggleSwitch.vue'
 import { formatRelativeTime } from '@/lib/format'
+import { selectionOf, summaryOf } from '@/lib/subfolders'
 import type { FeedbackState } from '@/composables/useFeedback'
 import type { Source, SyncProgress } from '@/lib/types'
 
@@ -37,6 +38,13 @@ const props = defineProps<{
    * der Liste, weit weg von der Quelle, um die es ging.
    */
   feedback?: Readonly<FeedbackState> | null
+  /**
+   * Angeschaltete Unterordner, die der letzte Abgleich nicht fand (E-70).
+   *
+   * Leise Hinweiszeile statt Fehlerrot: die übrigen Bilder laufen weiter,
+   * aber ein umbenannter Ordner soll nicht still 0 Fotos ergeben.
+   */
+  missing?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -93,8 +101,28 @@ const status = computed(() => {
     }
   }
 
+  const filter = filterText()
+  if (filter) parts.push(filter)
   if (!props.source.enabled) parts.push(t('sources.excludedFromShow'))
   return parts.join(' · ')
+})
+
+/** Kurzangabe zur Auswahl der Unterordner (E-70), `null` ohne Filter. */
+function filterText(): string | null {
+  const kind = props.source.kind.type
+  if (kind !== 'local' && kind !== 'webDav') return null
+  const summary = summaryOf(selectionOf(props.source))
+  if (!summary) return null
+  return summary.kind === 'excluded'
+    ? t('sources.subfoldersExcluded', { n: summary.n }, summary.n)
+    : t('sources.subfoldersSelected', { n: summary.n }, summary.n)
+}
+
+const missingText = computed(() => {
+  const list = props.missing ?? []
+  if (list.length === 0) return ''
+  const names = list.map((name) => t('sources.quoted', { name })).join(', ')
+  return t('sources.subfoldersMissing', { names })
 })
 
 /**
@@ -181,6 +209,7 @@ const iconPath = computed(() => {
       <div class="name">{{ source.name }}</div>
       <div class="status">{{ status }}</div>
       <div v-if="error && !syncing" class="status-error">{{ error }}</div>
+      <div v-else-if="missingText && !syncing" class="status-hint">{{ missingText }}</div>
       <SsFeedback v-if="!syncing" :feedback="feedback ?? null" />
       <!-- Schmaler Balken statt Zahlenkolonne: zeigt auf einen Blick, ob es
            vorangeht (der eigentliche Zweck waehrend eines langen Laufs). -->
@@ -213,6 +242,11 @@ const iconPath = computed(() => {
 .status-error {
   font-size: var(--ss-fs-m);
   color: var(--ss-error);
+}
+
+.status-hint {
+  font-size: var(--ss-fs-m);
+  color: var(--ss-text-muted);
 }
 
 .card {

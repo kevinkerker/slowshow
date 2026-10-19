@@ -1176,26 +1176,7 @@ fn effective_password(typed: &str, stored: &str) -> String {
 /// Protokoll, wo sie niemand sieht; die Oberfläche meldete bloß „erfolgreich".
 #[tauri::command]
 pub async fn test_source(app: AppHandle, source: Source, password: String) -> Res<Option<u32>> {
-    // Beim Bearbeiten bleibt das Passwortfeld leer -- der Hinweis darunter
-    // sagt ausdruecklich, dass das gespeicherte dann erhalten bleibt. Der
-    // Test reichte diesen leeren Wert wortwoertlich an den Server weiter und
-    // scheiterte an der Anmeldung, obwohl die Zugangsdaten stimmten. Damit
-    // pruefte er genau das Gegenteil dessen, was der Kommentar unten
-    // behauptet.
-    let password = if password.is_empty() {
-        let state = app.state::<AppState>();
-        let reference = password_ref(&source.kind).unwrap_or(&source.id).to_string();
-        let stored = state
-            .secrets
-            .lock()
-            .map_err(|_| "Zugangsdaten gesperrt")?
-            .get(&reference)
-            .unwrap_or_default()
-            .to_string();
-        effective_password(&password, &stored)
-    } else {
-        password
-    };
+    let password = dialog_password(&app, &source, password)?;
 
     // Postfaecher gehen nicht ueber den DAV-Client. Der Test nimmt denselben
     // Weg wie der Abruf -- ein Test, der etwas anderes prueft als den
@@ -1216,6 +1197,48 @@ pub async fn test_source(app: AppHandle, source: Source, password: String) -> Re
         .ok_or_else(|| "Für diese Quelle gibt es keinen Verbindungstest".to_string())?;
     client.test().await.map_err(|e| e.to_string())?;
     Ok(None)
+}
+
+/// Das Passwort, mit dem der Quellendialog etwas prueft oder auflistet.
+///
+/// Beim Bearbeiten bleibt das Passwortfeld leer -- der Hinweis darunter sagt
+/// ausdruecklich, dass das gespeicherte dann erhalten bleibt. Der
+/// Verbindungstest reichte diesen leeren Wert frueher wortwoertlich an den
+/// Server weiter und scheiterte an der Anmeldung, obwohl die Zugangsdaten
+/// stimmten. Dasselbe gilt fuer die Liste der Unterordner (E-70).
+fn dialog_password(app: &AppHandle, source: &Source, password: String) -> Res<String> {
+    if !password.is_empty() {
+        return Ok(password);
+    }
+    let state = app.state::<AppState>();
+    let reference = password_ref(&source.kind).unwrap_or(&source.id).to_string();
+    let stored = state
+        .secrets
+        .lock()
+        .map_err(|_| "Zugangsdaten gesperrt")?
+        .get(&reference)
+        .unwrap_or_default()
+        .to_string();
+    Ok(effective_password(&password, &stored))
+}
+
+/// Die Unterordner eines Ordners der Quelle, fuer die Auswahl (E-70).
+///
+/// Nimmt den Entwurf aus dem Dialog, nicht die gespeicherte Quelle: beim
+/// Anlegen gibt es noch keine, und beim Bearbeiten kann der Ordner gerade
+/// neu gewaehlt worden sein.
+#[tauri::command]
+pub async fn list_subfolders(
+    app: AppHandle,
+    source: Source,
+    password: String,
+    path: String,
+) -> Res<Vec<crate::sources::SubfolderEntry>> {
+    let password = dialog_password(&app, &source, password)?;
+    let client = RemoteClient::from_source(&app, &source, &password)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Diese Quelle hat keine Unterordner".to_string())?;
+    client.subfolders(&path).await.map_err(|e| e.to_string())
 }
 
 /// Listet die Photos-Alben einer Nextcloud zur Auswahl (FA-23).

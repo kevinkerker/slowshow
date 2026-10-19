@@ -8,10 +8,12 @@
 //! `tauri-plugin-android-fs` hat eine Rust-API, die Bilddaten müssen also nicht
 //! durch die WebView (R-03, NF-13).
 
+pub mod filter;
 pub mod local;
 pub mod nextcloud;
 pub mod webdav;
 
+pub use filter::{FolderFilter, SubfolderEntry};
 pub use local::LocalClient;
 pub use nextcloud::{Album, NextcloudClient};
 pub use webdav::{DavEntry, DavError, WebDavClient};
@@ -48,6 +50,9 @@ pub struct Listing {
     pub skipped: Vec<String>,
     /// Wurde eine der Obergrenzen erreicht? Dann ist die Liste unvollständig.
     pub truncated: bool,
+    /// Angeschaltete Unterordner, die es an der Quelle nicht (mehr) gibt
+    /// (E-70). Bei abgeschnittener Liste leer: dann ist das nicht entscheidbar.
+    pub missing_subfolders: Vec<String>,
 }
 
 pub enum RemoteClient {
@@ -129,12 +134,14 @@ impl RemoteClient {
     /// `Box::pin`, und die Warteschlange macht die Tiefenbegrenzung ohnehin
     /// deutlicher.
     ///
-    /// `subfolders` beschränkt auf bestimmte Unterordner (FA-29). Nextcloud-
-    /// Alben sind flach, dort greift der Filter nicht.
-    pub async fn list(&self, subfolders: &[String]) -> Result<Listing, DavError> {
+    /// `filter` ist die Auswahl der Unterordner (FA-29, E-70). Nextcloud-Alben
+    /// sind flach, dort greift sie nicht.
+    pub async fn list(&self, filter: &FolderFilter) -> Result<Listing, DavError> {
         if let Self::Local(c) = self {
-            return c.list(subfolders).await;
+            return c.list(filter).await;
         }
+        let all = FolderFilter::all();
+        let filter = if matches!(self, Self::Nextcloud(_)) { &all } else { filter };
         let dav = self.dav().expect("entfernte Quelle hat einen DAV-Client");
         let base = webdav::base_path(dav.base_url())?;
         let mut result = Listing::default();
@@ -142,6 +149,8 @@ impl RemoteClient {
         // (URL, Tiefe)
         let mut queue: Vec<(String, usize)> = vec![(dav.base_url().to_string(), 0)];
         let mut visited: Vec<String> = Vec::new();
+        // Betretene Unterordner, relativ — fuer die fehlenden (E-70).
+        let mut seen_dirs = std::collections::HashSet::new();
 
         while let Some((url, depth)) = queue.pop() {
             if visited.contains(&url) {
@@ -160,14 +169,15 @@ impl RemoteClient {
                         result.truncated = true;
                         continue;
                     }
-                    if !folder_allowed(&rel, subfolders) {
+                    if !filter.descend(&rel) {
                         continue;
                     }
                     queue.push((dav.url_for(&rel), depth + 1));
+                    seen_dirs.insert(rel);
                     continue;
                 }
 
-                if !file_allowed(&rel, subfolders) {
+                if !filter.file_allowed(&rel) {
                     continue;
                 }
 
@@ -199,7 +209,58 @@ impl RemoteClient {
             }
         }
 
+        if !result.truncated {
+            result.missing_subfolders = filter.missing(&seen_dirs);
+        }
         Ok(result)
+    }
+
+    /// Die Unterordner eines Ordners der Quelle, fuer die Auswahl (E-70).
+    ///
+    /// Eine Ebene je Aufruf: die Liste im Dialog klappt Ebenen erst auf
+    /// Wunsch auf. Den ganzen Baum vorab zu lesen hiesse bei einem NAS mit
+    /// Fotoarchiv minutenlang warten, bevor sich der Dialog bedienen laesst.
+    pub async fn subfolders(&self, path: &str) -> Result<Vec<SubfolderEntry>, DavError> {
+        let mut entries = match self {
+            Self::Local(c) => c.subfolders(path).await?,
+            Self::Nextcloud(_) => {
+                return Err(DavError::Url("Nextcloud-Alben haben keine Unterordner".into()))
+            }
+            Self::WebDav(dav) => {
+                let base = webdav::base_path(dav.base_url())?;
+                let url = if path.is_empty() {
+                    dav.base_url().to_string()
+                } else {
+                    dav.url_for(path)
+                };
+                let own = path.trim_matches('/');
+                let mut out = Vec::new();
+                for entry in dav.propfind(&url, 1).await? {
+                    let Some(rel) = webdav::relative_path(&entry.href, &base) else {
+                        continue;
+                    };
+                    if !entry.is_dir || rel == own {
+                        continue;
+                    }
+                    // Ein unlesbarer Unterordner soll die Liste nicht
+                    // verhindern; er erscheint dann nur ohne Vermerke.
+                    let children = dav.propfind(&dav.url_for(&rel), 1).await.unwrap_or_default();
+                    let inner: Vec<(String, bool)> = children
+                        .iter()
+                        .filter(|c| webdav::relative_path(&c.href, &base).as_deref() != Some(&rel))
+                        .map(|c| (c.name().to_string(), c.is_dir))
+                        .collect();
+                    out.push(SubfolderEntry::from_children(
+                        entry.name(),
+                        &rel,
+                        inner.iter().map(|(n, d)| (n.as_str(), *d)),
+                    ));
+                }
+                out
+            }
+        };
+        filter::sort_entries(&mut entries);
+        Ok(entries)
     }
 
     /// Muss die Laenge des Geladenen mit der Auflistung uebereinstimmen?
@@ -243,75 +304,9 @@ impl RemoteClient {
     }
 }
 
-/// Darf in diesen Ordner abgestiegen werden? (FA-29)
-///
-/// Ein Ordner ist erlaubt, wenn er auf dem Weg zu einem gewünschten
-/// Unterordner liegt oder selbst darunter.
-pub fn folder_allowed(rel: &str, subfolders: &[String]) -> bool {
-    if subfolders.is_empty() {
-        return true;
-    }
-    subfolders.iter().any(|f| {
-        let f = f.trim_matches('/');
-        f.is_empty() || rel.starts_with(f) || f.starts_with(rel)
-    })
-}
-
-/// Liegt die Datei in einem gewünschten Unterordner? (FA-29)
-pub fn file_allowed(rel: &str, subfolders: &[String]) -> bool {
-    if subfolders.is_empty() {
-        return true;
-    }
-    subfolders.iter().any(|f| {
-        let f = f.trim_matches('/');
-        f.is_empty() || rel.starts_with(&format!("{f}/"))
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn ohne_filter_ist_alles_erlaubt() {
-        assert!(folder_allowed("Urlaub", &[]));
-        assert!(file_allowed("Urlaub/1.jpg", &[]));
-        assert!(file_allowed("1.jpg", &[]));
-    }
-
-    #[test]
-    fn filter_laesst_nur_gewaehlte_unterordner_zu_fa_29() {
-        let filter = vec!["Urlaub".to_string()];
-
-        assert!(folder_allowed("Urlaub", &filter));
-        assert!(folder_allowed("Urlaub/2025", &filter));
-        assert!(!folder_allowed("Dokumente", &filter));
-
-        assert!(file_allowed("Urlaub/1.jpg", &filter));
-        assert!(file_allowed("Urlaub/2025/1.jpg", &filter));
-        assert!(!file_allowed("Dokumente/1.jpg", &filter));
-        assert!(
-            !file_allowed("1.jpg", &filter),
-            "Wurzeldateien sind nicht im Filterordner"
-        );
-    }
-
-    #[test]
-    fn filter_erlaubt_den_abstieg_ueber_zwischenordner() {
-        // Um "a/b/c" zu erreichen, muss "a" und "a/b" betreten werden dürfen.
-        let filter = vec!["a/b/c".to_string()];
-        assert!(folder_allowed("a", &filter));
-        assert!(folder_allowed("a/b", &filter));
-        assert!(folder_allowed("a/b/c", &filter));
-        assert!(!folder_allowed("x", &filter));
-    }
-
-    #[test]
-    fn filter_vertraegt_schraegstriche_am_rand() {
-        let filter = vec!["/Urlaub/".to_string()];
-        assert!(folder_allowed("Urlaub", &filter));
-        assert!(file_allowed("Urlaub/1.jpg", &filter));
-    }
 
     // `from_source` braucht einen AppHandle und ist deshalb nur am Geraet
     // pruefbar. Was sich ohne Tauri testen laesst, ist der Teil, auf den es

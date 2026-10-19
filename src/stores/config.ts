@@ -47,6 +47,11 @@ export const useConfigStore = defineStore('config', () => {
    * füllt das hier beim Start neu — der Zustand braucht also keine Datei.
    */
   const errors = ref<Record<string, string>>({})
+  /**
+   * Angeschaltete Unterordner, die der letzte Lauf nicht fand (E-70). Wie
+   * `errors` ohne Datei: der Hintergrund-Sync füllt es beim Start neu.
+   */
+  const missing = ref<Record<string, string[]>>({})
 
   const sources = computed(() => config.value?.sources ?? [])
 
@@ -72,10 +77,22 @@ export const useConfigStore = defineStore('config', () => {
     return errors.value[id] ?? null
   }
 
+  /** Fehlende Unterordner dieser Quelle aus dem letzten Lauf (E-70). */
+  function missingFor(id: string): string[] {
+    return missing.value[id] ?? []
+  }
+
   /** Merkt Erfolg oder Fehler eines Berichts für seine Quelle. */
   function noteReport(report: SyncReport) {
-    if (report.error) errors.value[report.sourceId] = report.error
-    else delete errors.value[report.sourceId]
+    if (report.error) {
+      // Ein gescheiterter Lauf hat nicht gelistet — was vorher fehlte, weiß
+      // er nicht besser. Der alte Hinweis bleibt stehen.
+      errors.value[report.sourceId] = report.error
+      return
+    }
+    delete errors.value[report.sourceId]
+    if (report.missingSubfolders?.length) missing.value[report.sourceId] = report.missingSubfolders
+    else delete missing.value[report.sourceId]
   }
 
   const ready = computed(() => config.value !== null)
@@ -215,6 +232,7 @@ export const useConfigStore = defineStore('config', () => {
     isSyncing,
     progressFor,
     errorFor,
+    missingFor,
     ready,
     load,
     dispose,

@@ -528,6 +528,10 @@ impl AppConfig {
         }
         for s in &mut self.sources {
             s.sync_interval_minutes = s.sync_interval_minutes.clamp(5, 10_080);
+            // E-70: die abgeleiteten Werte festschreiben, damit die Datei ab
+            // dem naechsten Schreiben ausdrueckt, was gilt.
+            s.include_root = Some(s.include_root());
+            s.include_new_subfolders = Some(s.include_new_subfolders());
         }
     }
 }
@@ -692,9 +696,23 @@ pub struct Source {
     /// Fließt die Quelle in die Diashow ein? (FA-25)
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// Nur diese Unterordner berücksichtigen. Leer = alle (FA-29).
+    /// Ausdruecklich angeschaltete Unterordner (FA-29, E-70).
+    ///
+    /// Bis E-70 die einzige Angabe: „nur diese", leer = alle. Seitdem eine von
+    /// zwei Listen; welche Regel gilt, steht in [`crate::sources::filter`].
     #[serde(default)]
     pub subfolders: Vec<String>,
+    /// Ausdruecklich abgeschaltete Unterordner (E-70) — etwa WhatsApps
+    /// `Sent` und `Private`.
+    #[serde(default)]
+    pub excluded_subfolders: Vec<String>,
+    /// Bilder direkt im gewaehlten Ordner (E-70). `None` nur in Dateien von
+    /// vor E-70, siehe [`Source::include_root`].
+    #[serde(default)]
+    pub include_root: Option<bool>,
+    /// Neue Unterordner automatisch aufnehmen (E-70). `None` wie oben.
+    #[serde(default)]
+    pub include_new_subfolders: Option<bool>,
     /// Mindestauflösung in Pixeln; darunter wird verworfen (FA-29). 0 = aus.
     #[serde(default)]
     pub min_width: u32,
@@ -713,6 +731,24 @@ fn default_sync_interval() -> u64 {
 }
 
 impl Source {
+    /// Zaehlen die Bilder direkt im gewaehlten Ordner? (E-70)
+    ///
+    /// Vor E-70 hiess ein gesetzter Filter „nur diese Unterordner", und die
+    /// Wurzel fiel dabei weg; ohne Filter zaehlte alles. Genau das leitet der
+    /// Rueckfall ab, damit eine alte Konfiguration dasselbe zeigt wie vorher.
+    pub fn include_root(&self) -> bool {
+        self.include_root.unwrap_or(self.subfolders.is_empty())
+    }
+
+    /// Kommen Unterordner ohne eigene Entscheidung dazu? (E-70)
+    ///
+    /// Rueckfall wie bei [`Self::include_root`]: ein alter Filter war eine
+    /// Positivliste, neue Ordner blieben draussen.
+    pub fn include_new_subfolders(&self) -> bool {
+        self.include_new_subfolders
+            .unwrap_or(self.subfolders.is_empty())
+    }
+
     /// Nur entfernte Quellen holt der Rust-Sync selbst ab; lokale Ordner treibt
     /// das Frontend, weil SAF ausschließlich über die Android-Brücke erreichbar ist.
     pub fn is_remote(&self) -> bool {
@@ -749,6 +785,9 @@ mod tests {
             },
             enabled: true,
             subfolders: vec![],
+            excluded_subfolders: vec![],
+            include_root: None,
+            include_new_subfolders: None,
             min_width: 0,
             min_height: 0,
             sync_interval_minutes: 60,
@@ -884,6 +923,42 @@ mod tests {
             }
             other => panic!("Local erwartet, war {other:?}"),
         }
+    }
+
+    #[test]
+    fn alter_unterordner_filter_behaelt_seine_bedeutung_e_70() {
+        // Datei von vor E-70: nur `subfolders`, keine der neuen Felder.
+        let json = |filter: &str| {
+            format!(
+                r#"{{"id": "s", "name": "S",
+                    "kind": {{ "type": "local", "safUri": "{{}}", "displayPath": "DCIM" }},
+                    "subfolders": {filter}}}"#
+            )
+        };
+        let mit: Source = serde_json::from_str(&json(r#"["Urlaub"]"#)).unwrap();
+        assert!(!mit.include_root(), "mit Filter fielen die Wurzeldateien weg");
+        assert!(!mit.include_new_subfolders(), "und neue Ordner blieben draussen");
+        assert!(mit.excluded_subfolders.is_empty());
+
+        let ohne: Source = serde_json::from_str(&json("[]")).unwrap();
+        assert!(ohne.include_root());
+        assert!(ohne.include_new_subfolders());
+    }
+
+    #[test]
+    fn clamp_schreibt_die_abgeleitete_auswahl_fest_e_70() {
+        let mut cfg = AppConfig::default();
+        let mut s = webdav_source();
+        s.subfolders = vec!["Urlaub".into()];
+        cfg.sources = vec![s];
+        cfg.clamp();
+        assert_eq!(cfg.sources[0].include_root, Some(false));
+        assert_eq!(cfg.sources[0].include_new_subfolders, Some(false));
+
+        let text = serde_json::to_string(&cfg.sources[0]).unwrap();
+        assert!(text.contains(r#""excludedSubfolders":[]"#), "{text}");
+        assert!(text.contains(r#""includeRoot":false"#), "{text}");
+        assert!(text.contains(r#""includeNewSubfolders":false"#), "{text}");
     }
 
     #[test]

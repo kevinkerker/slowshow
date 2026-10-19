@@ -11,7 +11,7 @@
 use crate::cache::{Cache, DeltaState};
 use crate::decode::{self, DecodeError};
 use crate::model::{CacheConfig, Source};
-use crate::sources::{Listing, RemoteClient, RemoteFile};
+use crate::sources::{DavError, FolderFilter, Listing, RemoteClient, RemoteFile};
 use std::collections::HashSet;
 use std::sync::Mutex;
 
@@ -60,6 +60,10 @@ pub struct SyncReport {
     /// scheitern alle, scheitern sie fast immer am selben. Ohne Dateinamen,
     /// denn der Text geht in den Diagnosebericht.
     pub first_failure: Option<String>,
+    /// Angeschaltete Unterordner, die es an der Quelle nicht gibt (E-70).
+    ///
+    /// Vorher ergab ein vertippter oder umbenannter Ordner still 0 Fotos.
+    pub missing_subfolders: Vec<String>,
 }
 
 impl SyncReport {
@@ -96,6 +100,64 @@ impl SyncReport {
             return true;
         }
         false
+    }
+
+    /// Zaehlt ein gescheitertes Lesen. `true` heisst: der Lauf muss enden (E-71).
+    ///
+    /// Ein verlorener Zugriff (`DavError::Access`) endet sofort — jede weitere
+    /// Datei scheiterte genauso. Sonst endet der Lauf nach
+    /// [`READ_FAILURE_LIMIT`] Fehlern derselben Art in Folge: vorher lief ein
+    /// Testgeraet 1387 Dateien einzeln in dieselbe Sperre.
+    pub fn fail_read(&mut self, e: &DavError, streak: &mut ReadStreak) -> bool {
+        self.fail("Lesen", e);
+        if matches!(e, DavError::Access(_)) {
+            self.error = Some(e.to_string());
+            return true;
+        }
+        if streak.push(e) >= READ_FAILURE_LIMIT {
+            self.error = Some(format!(
+                "Abgebrochen nach {READ_FAILURE_LIMIT} gleichen Lesefehlern in Folge — {e}"
+            ));
+            return true;
+        }
+        false
+    }
+}
+
+/// Lesefehler derselben Art in Folge, nach denen ein Lauf endet (E-71).
+///
+/// Zehn ohne ein einziges gelesenes Bild dazwischen sind kein Pech mehr,
+/// sondern eine Ursache, die fuer den Rest genauso gilt. Der naechste Takt
+/// versucht es erneut, weil `last_sync` ungestempelt bleibt.
+pub const READ_FAILURE_LIMIT: usize = 10;
+
+/// Serie gleichartiger Lesefehler (E-71).
+///
+/// Verglichen wird die Art des Fehlers, nicht der Text: die Meldungen des
+/// SAF-Plugins nennen die Adresse der Datei und unterscheiden sich deshalb
+/// bei jeder.
+#[derive(Default)]
+pub struct ReadStreak {
+    kind: Option<std::mem::Discriminant<DavError>>,
+    count: usize,
+}
+
+impl ReadStreak {
+    /// Nimmt einen Fehler auf und liefert die Laenge der Serie.
+    pub fn push(&mut self, e: &DavError) -> usize {
+        let kind = std::mem::discriminant(e);
+        if self.kind == Some(kind) {
+            self.count += 1;
+        } else {
+            self.kind = Some(kind);
+            self.count = 1;
+        }
+        self.count
+    }
+
+    /// Ein gelesenes Bild beendet die Serie.
+    pub fn reset(&mut self) {
+        *self = Self::default();
     }
 }
 
@@ -160,7 +222,7 @@ pub async fn sync_source(
 ) -> SyncReport {
     let mut report = SyncReport::for_source(&source.id);
 
-    let listing: Listing = match client.list(&source.subfolders).await {
+    let listing: Listing = match client.list(&FolderFilter::of(source)).await {
         Ok(l) => l,
         Err(e) => {
             // FA-26: ein Fehler beim Sync darf die Diashow nicht anhalten —
@@ -178,6 +240,10 @@ pub async fn sync_source(
         listing.skipped.len()
     );
     report.truncated = listing.truncated;
+    report.missing_subfolders = listing.missing_subfolders.clone();
+    for path in &listing.missing_subfolders {
+        log::warn!("'{}': Unterordner '{path}' nicht gefunden", source.name);
+    }
     report.skipped += listing.skipped.len();
     for path in &listing.skipped {
         // FA-09: übersprungene HEIC-Dateien werden im Log vermerkt.
@@ -197,6 +263,7 @@ pub async fn sync_source(
     let total = plan.to_fetch.len();
     let mut stored_count = 0usize;
     let mut fetched_new = 0usize;
+    let mut read_streak = ReadStreak::default();
 
     for (index, file) in plan.to_fetch.iter().enumerate() {
         // Zu Beginn der Runde melden, nicht am Ende: die Schleife verlässt
@@ -217,14 +284,24 @@ pub async fn sync_source(
             .fetch(file, cfg.target_width, cfg.target_height)
             .await
         {
-            Ok(b) => b,
+            Ok(b) => {
+                read_streak.reset();
+                b
+            }
             Err(e) => {
                 log::warn!(
                     "'{}': {} konnte nicht geladen werden: {e}",
                     source.name,
                     file.rel_path
                 );
-                report.fail("Lesen", &e);
+                if report.fail_read(&e, &mut read_streak) {
+                    log::warn!(
+                        "'{}': Abgleich nach {} von {total} Dateien abgebrochen",
+                        source.name,
+                        index + 1
+                    );
+                    break;
+                }
                 continue;
             }
         };
@@ -499,6 +576,46 @@ mod tests {
     }
 
     #[test]
+    fn verlorener_zugriff_beendet_den_lauf_sofort_e_71() {
+        let mut r = SyncReport::for_source("s");
+        let mut streak = ReadStreak::default();
+        let gesperrt = DavError::Access("gesperrt".into());
+        assert!(r.fail_read(&gesperrt, &mut streak), "der Lauf muss enden");
+        assert_eq!(r.failed, 1);
+        assert_eq!(r.error.as_deref(), Some("gesperrt"));
+    }
+
+    #[test]
+    fn gleiche_lesefehler_in_folge_beenden_den_lauf_e_71() {
+        let mut r = SyncReport::for_source("s");
+        let mut streak = ReadStreak::default();
+        // Unterschiedlicher Text, gleiche Art — wie beim SAF-Plugin, das die
+        // Adresse jeder Datei nennt.
+        for i in 1..READ_FAILURE_LIMIT {
+            let e = DavError::Url(format!("Datei nicht lesbar: content://x/{i}"));
+            assert!(!r.fail_read(&e, &mut streak), "Fehler {i} laesst weiterlaufen");
+        }
+        let e = DavError::Url("Datei nicht lesbar: content://x/letzte".into());
+        assert!(r.fail_read(&e, &mut streak), "der zehnte beendet den Lauf");
+        assert_eq!(r.failed, READ_FAILURE_LIMIT);
+        let text = r.error.unwrap();
+        assert!(text.contains("10 gleichen Lesefehlern"), "{text}");
+        assert!(text.contains("Datei nicht lesbar"), "der Grund steht dabei");
+    }
+
+    #[test]
+    fn ein_gelesenes_bild_oder_ein_anderer_fehler_beendet_die_serie_e_71() {
+        let mut streak = ReadStreak::default();
+        let url = DavError::Url("x".into());
+        assert_eq!(streak.push(&url), 1);
+        assert_eq!(streak.push(&url), 2);
+        streak.reset();
+        assert_eq!(streak.push(&url), 1);
+        assert_eq!(streak.push(&DavError::Status { status: 404 }), 1);
+        assert_eq!(streak.push(&url), 1);
+    }
+
+    #[test]
     fn voller_speicher_beendet_den_lauf_mit_fehler_e_69() {
         let mut r = SyncReport::for_source("s");
         let voll = crate::cache::CacheError::Io(std::io::ErrorKind::StorageFull.into());
@@ -735,6 +852,9 @@ mod tests {
             },
             enabled: true,
             subfolders: vec![],
+            excluded_subfolders: vec![],
+            include_root: None,
+            include_new_subfolders: None,
             min_width: 0,
             min_height: 0,
             sync_interval_minutes: 60,
