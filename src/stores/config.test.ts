@@ -233,3 +233,27 @@ describe('configStore: Fortschritt mehrerer Quellen', () => {
     expect(store.isSyncing('a')).toBe(true)
   })
 })
+
+describe('configStore.smartHomeEnabled (FA-46)', () => {
+  it('ist aus, solange keine Adresse eingetragen ist', () => {
+    const store = useConfigStore()
+    store.config = CONFIG
+    expect(store.smartHomeEnabled).toBe(false)
+    store.config = { ...CONFIG, smartHome: { url: '', timeoutSeconds: 120, showBackButton: true, backButtonCorner: 'topRight' } }
+    expect(store.smartHomeEnabled).toBe(false)
+  })
+
+  it('ist an, sobald das Backend eine Adresse uebernommen hat', () => {
+    const store = useConfigStore()
+    store.config = {
+      ...CONFIG,
+      smartHome: {
+        url: 'http://homeassistant.local:8123/wandtablet/jetzt?kiosk',
+        timeoutSeconds: 120,
+        showBackButton: true,
+        backButtonCorner: 'topRight',
+      },
+    }
+    expect(store.smartHomeEnabled).toBe(true)
+  })
+})

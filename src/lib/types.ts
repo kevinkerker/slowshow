@@ -140,6 +140,23 @@ export interface MqttConfig {
   discoveryPrefix: string
 }
 
+/**
+ * Ecke des Zurück-Knopfs über der Smart-Home-Ansicht (FA-46, E-74).
+ * Gegenstück zu `model::ButtonCorner`.
+ */
+export type ButtonCorner = 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight'
+
+/** Smart-Home-Ansicht hinter dem Tipp in die Mitte (FA-46). Gegenstück zu `model::SmartHomeConfig`. */
+export interface SmartHomeConfig {
+  /** Adresse der Oberfläche, nur http und https. Leer heißt aus. */
+  url: string
+  /** Rückkehr zur Diashow nach so vielen Sekunden ohne Berührung (E-74, E-76). */
+  timeoutSeconds: number
+  /** Kleiner Knopf „Diashow“ über der Seite (E-74). */
+  showBackButton: boolean
+  backButtonCorner: ButtonCorner
+}
+
 /** Zustand der MQTT-Verbindung (Gegenstück zu mqtt::MqttStatus). */
 export interface MqttStatus {
   /** Ist der Dienst gestartet? */
@@ -225,6 +242,8 @@ export interface AppConfig {
   remote: RemoteConfig
   mqtt: MqttConfig
   upnp: UpnpConfig
+  /** Smart-Home-Ansicht (FA-46). */
+  smartHome: SmartHomeConfig
   /** Zwei Hochformatbilder nebeneinander (FA-08). */
   pairMode: boolean
   /** Langsames Zoomen/Schwenken (FA-10). */
@@ -440,6 +459,8 @@ export const EVENTS = {
   mqtt: 'slowshow://mqtt',
   /** Neues Einzelbild eines Kamerastroms (E-67). */
   liveFrame: 'slowshow://live-frame',
+  /** Die Smart-Home-Ansicht ist zu, die Diashow läuft weiter (FA-46). */
+  smartHomeClosed: 'slowshow://smart-home-closed',
 } as const
 
 /**

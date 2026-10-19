@@ -14,6 +14,7 @@
 //! | `playlist`  | Reihenfolge und Fortschritt                    | FA-01, FA-03, FA-08|
 //! | `schedule`  | Zeitplan, Helligkeit, Nachtmodus               | FA-52–54           |
 //! | `remote`    | Heimnetz-Steuerung per REST                    | FA-55              |
+//! | `smart_home`| Smart-Home-Ansicht hinter dem Tipp in die Mitte| FA-46              |
 //! | `commands`  | Schnittstelle zum Frontend                     | —                  |
 
 pub mod android_bridge;
@@ -34,6 +35,7 @@ pub mod remote;
 pub mod schedule;
 pub mod scheduler;
 pub mod secrets;
+pub mod smart_home;
 pub mod sources;
 pub mod state;
 pub mod sync;
@@ -198,6 +200,7 @@ pub fn run() {
             commands::list_subfolders,
             commands::list_nextcloud_albums,
             commands::sync_now,
+            commands::open_smart_home,
         ])
         .setup(|app| {
             #[cfg(target_os = "android")]
@@ -235,6 +238,10 @@ pub fn run() {
             app.manage(MqttService::default());
             app.manage(UpnpService::default());
             app.manage(BackgroundTasks::default());
+            // FA-46: die native Ansicht meldet ihr Schliessen ueber JNI und
+            // braucht dafuer den Handle; der Zustand muss vorher stehen.
+            app.manage(smart_home::SmartHomeView::default());
+            smart_home::register_app(app.handle());
 
             // Erst der Zustand, dann das Fenster (E-54, NF-01).
             //

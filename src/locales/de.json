@@ -11,6 +11,9 @@
     "system": "System",
     "close": "Schließen"
   },
+  "smartHome": {
+    "back": "Diashow"
+  },
   "slideshow": {
     "empty": "Noch keine Bilder",
     "emptyHint": "Fügen Sie eine Quelle hinzu, um die Diashow zu starten.",
@@ -308,6 +311,22 @@
   },
   "system": {
     "title": "System",
+    "smartHome": "Smart Home",
+    "smartHomeUrl": "Adresse der Oberfläche",
+    "smartHomeUrlHint": "Ein kurzer Tipp in die Bildmitte öffnet diese Seite als Vollbild, etwa ein Home-Assistant-Dashboard mit ?kiosk am Ende. Leer lassen schaltet das ab.",
+    "smartHomeUrlPlaceholder": "http://homeassistant.local:8123/…",
+    "smartHomeUrlRejected": "Nur Adressen mit http:// oder https://",
+    "smartHomeTimeout": "Zurück zur Diashow nach",
+    "smartHomeTimeoutHint": "Gezählt ab der letzten Berührung.",
+    "smartHomeSeconds": "{n} Sekunden",
+    "smartHomeMinutes": "{n} Minute | {n} Minuten",
+    "smartHomeButton": "Knopf „Diashow“ zeigen",
+    "smartHomeButtonHint": "Ein kleiner Knopf über der Seite führt sofort zurück.",
+    "smartHomeCorner": "Ecke des Knopfs",
+    "smartHomeCornerTopLeft": "Oben links",
+    "smartHomeCornerTopRight": "Oben rechts",
+    "smartHomeCornerBottomLeft": "Unten links",
+    "smartHomeCornerBottomRight": "Unten rechts",
     "cache": "Cache",
     "cacheUsage": "{used} von {total}",
     "cacheImages": "{n} Bilder",

@@ -335,6 +335,11 @@ if (issue) {
 
 const checks = [
   ['android.permission.INTERNET', 'Netzzugriff für FA-21/FA-23'],
+  // Tauris Vorlage setzt hier einen Platzhalter, der im Release-Bau `false`
+  // ergibt. Ohne den festen Wert liefe weder ein HTTP-NAS (FA-21) noch die
+  // Smart-Home-Ansicht unter http://homeassistant.local (FA-46) — und das
+  // fiele erst am Gerät auf, im Debug-Bau nie.
+  ['android:usesCleartextTraffic="true"', 'HTTP im Heimnetz (FA-21, FA-46)'],
   ['android:allowBackup="false"', 'kein Cloud-Backup der Zugangsdaten (NF-05)'],
   ['sensorLandscape', 'Querformat (RB-02)'],
 ]
@@ -396,6 +401,8 @@ for (const [needle, why] of [
   ['FLAG_KEEP_SCREEN_ON', 'Bildschirm bleibt an (FA-50)'],
   ['systemBars', 'Vollbild ohne Systemleisten (FA-01)'],
   ['screenBrightness', 'Displayhelligkeit (FA-53)'],
+  ['showSmartHome', 'Smart-Home-Ansicht (FA-46)'],
+  ['nativeSmartHomeClosed', 'Rückmeldung „Ansicht geschlossen“ an Rust (FA-46)'],
 ]) {
   if (!activityCode.includes(needle)) {
     console.error(`  fehlt in MainActivity.kt: ${needle} — ${why}`)

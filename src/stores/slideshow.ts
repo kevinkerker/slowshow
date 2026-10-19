@@ -20,6 +20,16 @@ export const useSlideshowStore = defineStore('slideshow', () => {
   const info = ref<Record<string, CacheEntry>>({})
   /** Anzahl Bilder in der Playlist; 0 heißt „noch keine Quelle eingerichtet". */
   const hasImages = ref(false)
+  /**
+   * Die Smart-Home-Ansicht liegt über der Diashow (FA-46).
+   *
+   * Getrennt von `playing`: die Diashow hält an, solange die Ansicht offen
+   * ist, aber die Pause des Nutzers bleibt, wie sie war. Wer vorher pausiert
+   * hatte, findet danach weiter ein pausiertes Bild vor; wer nicht, eine
+   * laufende Diashow. Das Backend erfährt davon nichts — Home Assistant sieht
+   * den Rahmen weiter als „läuft“ (E-47).
+   */
+  const suspended = ref(false)
 
   let timer: ReturnType<typeof setTimeout> | null = null
   let unlisten: UnlistenFn[] = []
@@ -83,6 +93,12 @@ export const useSlideshowStore = defineStore('slideshow', () => {
         lastLiveFrame.value = e.payload
       }),
     )
+    // Smart-Home-Ansicht zu (FA-46): Timeout, Knopf oder Zurück-Taste. Die
+    // Diashow läuft weiter, und zwar mit voller Anzeigedauer für das Bild,
+    // das jetzt wieder zu sehen ist.
+    unlisten.push(
+      await listen(EVENTS.smartHomeClosed, () => resumeFromSmartHome()),
+    )
     // Waehrend eines Syncs: sobald das erste Bild im Cache liegt, anzeigen,
     // statt bis zum Ende des Laufs zu warten.
     unlisten.push(
@@ -131,10 +147,10 @@ export const useSlideshowStore = defineStore('slideshow', () => {
     if (timer) clearTimeout(timer)
     timer = setTimeout(
       async () => {
-        if (!playing.value || !activeGetter()) {
-          // Pausiert oder außerhalb der Aktivzeit: weiter takten, aber nicht
-          // weiterschalten — sonst müsste beim Fortsetzen erst ein voller
-          // Zyklus abgewartet werden.
+        if (!playing.value || suspended.value || !activeGetter()) {
+          // Pausiert, hinter der Smart-Home-Ansicht oder außerhalb der
+          // Aktivzeit: weiter takten, aber nicht weiterschalten — sonst müsste
+          // beim Fortsetzen erst ein voller Zyklus abgewartet werden.
           restartTimer()
           return
         }
@@ -176,6 +192,39 @@ export const useSlideshowStore = defineStore('slideshow', () => {
     await refreshInfo()
     restartTimer()
     await prefetch()
+  }
+
+  /**
+   * Öffnet die Smart-Home-Ansicht (FA-46, E-73).
+   *
+   * Liefert `false`, wenn das Backend sie nicht öffnet (keine Adresse, Nacht,
+   * Desktop) oder die Brücke scheitert — der Aufrufer schaltet dann wie
+   * bisher die Pause um. Ein Fehler wird nicht weitergereicht: ein Tipp auf
+   * den Rahmen soll nie mit einer Fehlermeldung enden.
+   */
+  async function openSmartHome(label: string): Promise<boolean> {
+    let opened = false
+    try {
+      opened = await api.openSmartHome(label)
+    } catch (e) {
+      console.error('Smart-Home-Ansicht nicht geöffnet', e)
+    }
+    if (opened) suspended.value = true
+    return opened
+  }
+
+  /**
+   * Zurück aus der Smart-Home-Ansicht: die Diashow läuft weiter.
+   *
+   * Auch gerufen, wenn eine Berührung die Diashow erreicht, obwohl die
+   * Ansicht als offen gilt — dann liegt sie offenbar nicht mehr darüber, und
+   * das Schließen-Ereignis ging verloren. Ohne das stünde der Rahmen still
+   * (NF-01).
+   */
+  function resumeFromSmartHome() {
+    if (!suspended.value) return
+    suspended.value = false
+    restartTimer()
   }
 
   async function togglePlaying() {
@@ -252,6 +301,7 @@ export const useSlideshowStore = defineStore('slideshow', () => {
     playing,
     info,
     hasImages,
+    suspended,
     currentIds,
     liveFrame,
     start,
@@ -259,6 +309,8 @@ export const useSlideshowStore = defineStore('slideshow', () => {
     next,
     prev,
     togglePlaying,
+    openSmartHome,
+    resumeFromSmartHome,
     excludeCurrent,
     prefetch,
     restartTimer,

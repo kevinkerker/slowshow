@@ -492,6 +492,14 @@ pub fn diagnostic_report(input: &DiagnosticInput<'_>) -> String {
     let _ = writeln!(out, "Zeitplan          {}", c.schedule.enabled);
     let _ = writeln!(out, "Heimnetz          {}", c.remote.enabled);
     let _ = writeln!(out, "MQTT              {}", c.mqtt.enabled);
+    // FA-46: nur ob, nie die Adresse — sie nennt den Rechner im Heimnetz.
+    let _ = writeln!(
+        out,
+        "Smart Home        {} (Rueckkehr {} s, Knopf {})",
+        c.smart_home.is_enabled(),
+        c.smart_home.timeout_seconds,
+        c.smart_home.show_back_button
+    );
     let _ = writeln!(out);
 
     // Quellen ohne Adresse und ohne Benutzernamen: Art und Einstellungen
@@ -709,6 +717,7 @@ mod tests {
             ..Default::default()
         };
         cfg.remote.enabled = true;
+        cfg.smart_home.url = "http://homeassistant.local:8123/wandtablet/jetzt?kiosk".into();
         cfg.sources = vec![
             crate::model::Source {
                 id: "s1".into(),
@@ -864,6 +873,8 @@ mod tests {
             "Geheimer Urlaub",     // Name eines fehlenden Unterordners
             "Sent",                // Name eines abgeschalteten Unterordners
             "2026-0607_Urlaub",    // Name der Quelle
+            "homeassistant.local", // Adresse der Smart-Home-Ansicht (FA-46)
+            "wandtablet",          // Pfad des Dashboards
         ] {
             assert!(
                 !b.contains(verboten),
@@ -927,6 +938,7 @@ Sitzung 4711-abc"), "Abgelehnt");
             "permission denied",
             "Filter: 0 Unterordner an, 2 aus, Hauptordner ja, neue automatisch ja", // E-70
             "Unterordner nicht gefunden: 1",
+            "Smart Home        true (Rueckkehr 120 s, Knopf true)", // FA-46
         ] {
             assert!(b.contains(noetig), "„{noetig}\" fehlt im Bericht:\n{b}");
         }
@@ -1001,6 +1013,36 @@ Sitzung 4711-abc"), "Abgelehnt");
             r#"{{"schemaVersion":1,"createdAt":0,"nochWas":true,"config":{cfg}}}"#
         );
         assert!(parse_backup(&json).is_ok());
+    }
+
+    #[test]
+    fn sicherung_traegt_die_smart_home_ansicht_fa_46() {
+        // FA-45: wer den Rahmen neu aufsetzt, will das Dashboard nicht noch
+        // einmal von Hand eintippen.
+        let mut cfg = crate::model::AppConfig::default();
+        cfg.smart_home.url = "http://homeassistant.local:8123/wandtablet/jetzt?kiosk".into();
+        cfg.smart_home.timeout_seconds = 300;
+        cfg.smart_home.show_back_button = false;
+        cfg.smart_home.back_button_corner = crate::model::ButtonCorner::BottomRight;
+        let json = serde_json::to_string(&Backup {
+            schema_version: SCHEMA_VERSION,
+            created_at: 0,
+            config: cfg.clone(),
+        })
+        .unwrap();
+
+        let back = parse_backup(&json).expect("muss lesbar sein");
+        assert_eq!(back.config.smart_home, cfg.smart_home);
+    }
+
+    #[test]
+    fn alte_sicherung_ohne_smart_home_bleibt_lesbar() {
+        // Eine Sicherung von vor FA-46 kennt den Block nicht; sie spielt sich
+        // mit der Voreinstellung ein, also ohne Ansicht (NF-10).
+        let json = r#"{"schemaVersion":1,"createdAt":0,"config":{"intervalSeconds":45}}"#;
+        let b = parse_backup(json).expect("muss lesbar sein");
+        assert_eq!(b.config.interval_seconds, 45);
+        assert!(!b.config.smart_home.is_enabled());
     }
 
     #[test]

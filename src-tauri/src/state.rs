@@ -48,6 +48,9 @@ pub mod events {
     /// Ein Kamerastrom hat ein neues Einzelbild (E-67). Traegt nur Id und
     /// Nummer; das Bild selbst holt die Oberflaeche ueber das Asset-Protokoll.
     pub const LIVE_FRAME: &str = "slowshow://live-frame";
+    /// Die Smart-Home-Ansicht wurde geschlossen (FA-46): Timeout, Knopf,
+    /// Zurück-Taste oder geleerte Adresse. Ohne Nutzlast.
+    pub const SMART_HOME_CLOSED: &str = "slowshow://smart-home-closed";
 }
 
 /// Nutzlast von [`events::LIVE_FRAME`].

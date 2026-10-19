@@ -209,3 +209,65 @@ describe('Diashow', () => {
     await router.push('/')
   })
 })
+
+/**
+ * Tipp in die Mitte mit und ohne Smart-Home-Ansicht (FA-46, E-73).
+ *
+ * jsdom kennt keine Breite — `tapZone` wertet einen Tipp bei Breite 0 als
+ * Mitte. Genau die Zone, um die es hier geht.
+ */
+describe('Tipp in die Mitte', () => {
+  const ADRESSE = 'http://homeassistant.local:8123/wandtablet/jetzt?kiosk'
+
+  async function start(url: string) {
+    vi.spyOn(api, 'getConfig').mockResolvedValue({
+      ...CONFIG,
+      smartHome: { url, timeoutSeconds: 120, showBackButton: true, backButtonCorner: 'topRight' },
+    } as AppConfig)
+    vi.spyOn(api, 'setPlaying').mockResolvedValue()
+    await router.push('/')
+    await router.isReady()
+    const wrapper = mount(App, { global: { plugins: [router, i18n] }, attachTo: document.body })
+    await flushPromises()
+    await flushPromises()
+    return wrapper
+  }
+
+  async function tippe(wrapper: Awaited<ReturnType<typeof start>>) {
+    const flaeche = wrapper.get('.slideshow')
+    await flaeche.trigger('pointerdown', { clientX: 0, clientY: 0 })
+    await flaeche.trigger('pointerup', { clientX: 0, clientY: 0 })
+    await flushPromises()
+  }
+
+  it('pausiert ohne Adresse wie bisher', async () => {
+    const oeffnen = vi.spyOn(api, 'openSmartHome').mockResolvedValue(true)
+    const wrapper = await start('')
+    await tippe(wrapper)
+    expect(oeffnen).not.toHaveBeenCalled()
+    expect(api.setPlaying).toHaveBeenCalledWith(false)
+    wrapper.unmount()
+  })
+
+  it('oeffnet mit Adresse die Smart-Home-Ansicht statt zu pausieren', async () => {
+    const oeffnen = vi.spyOn(api, 'openSmartHome').mockResolvedValue(true)
+    const wrapper = await start(ADRESSE)
+    await tippe(wrapper)
+    // Aufschrift des Knopfs in der Sprache der Oberflaeche.
+    expect(oeffnen).toHaveBeenCalledWith('Diashow')
+    expect(api.setPlaying).not.toHaveBeenCalled()
+    const { useSlideshowStore } = await import('./stores/slideshow')
+    expect(useSlideshowStore().suspended).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('pausiert, wenn das Backend nicht oeffnet (Nacht, Desktop)', async () => {
+    // E-79 und Lastenheft 1.3: die Ansicht oeffnet nicht, der Tipp darf
+    // trotzdem nicht ins Leere gehen.
+    vi.spyOn(api, 'openSmartHome').mockResolvedValue(false)
+    const wrapper = await start(ADRESSE)
+    await tippe(wrapper)
+    expect(api.setPlaying).toHaveBeenCalledWith(false)
+    wrapper.unmount()
+  })
+})

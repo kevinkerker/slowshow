@@ -250,3 +250,84 @@ describe('Sicherung auf dem Schreibtisch', () => {
     await vi.waitFor(() => expect(importConfig).toHaveBeenCalledWith('{"c":3}'))
   })
 })
+
+/**
+ * Abschnitt „Smart Home“ (FA-46).
+ *
+ * Was ohne Wirkung ist, steht nicht da: Rückkehrzeit und Ecke erst mit
+ * Adresse, die Ecke nur mit Knopf.
+ */
+describe('Smart Home', () => {
+  const ADRESSE = 'http://homeassistant.local:8123/wandtablet/jetzt?kiosk'
+
+  function mitSmartHome(smartHome: Partial<AppConfig['smartHome']>) {
+    return {
+      ...CONFIG,
+      smartHome: {
+        url: '',
+        timeoutSeconds: 120,
+        showBackButton: true,
+        backButtonCorner: 'topRight',
+        ...smartHome,
+      },
+    } as AppConfig
+  }
+
+  function zeilen(w: ReturnType<typeof setup>) {
+    return w.get('.smart-home').findAll('.label').map((l) => l.text())
+  }
+
+  it('zeigt ohne Adresse nur das Adressfeld', () => {
+    const w = setup(mitSmartHome({}))
+    expect(zeilen(w)).toEqual(['Adresse der Oberfläche'])
+  })
+
+  it('zeigt mit Adresse Rueckkehrzeit, Knopf und Ecke', () => {
+    const w = setup(mitSmartHome({ url: ADRESSE }))
+    expect(zeilen(w)).toEqual([
+      'Adresse der Oberfläche',
+      'Zurück zur Diashow nach',
+      'Knopf „Diashow“ zeigen',
+      'Ecke des Knopfs',
+    ])
+    // Voreinstellung zwei Minuten, Ecke oben rechts.
+    const [zeit, ecke] = w.get('.smart-home').findAll('select')
+    expect((zeit.element as HTMLSelectElement).selectedOptions[0].text.trim()).toBe('2 Minuten')
+    expect((ecke.element as HTMLSelectElement).selectedOptions[0].text.trim()).toBe('Oben rechts')
+  })
+
+  it('blendet die Ecke aus, wenn der Knopf aus ist', () => {
+    const w = setup(mitSmartHome({ url: ADRESSE, showBackButton: false }))
+    expect(zeilen(w)).not.toContain('Ecke des Knopfs')
+    expect(zeilen(w)).toContain('Knopf „Diashow“ zeigen')
+  })
+
+  it('meldet eine Adresse, die das Backend verworfen hat', async () => {
+    // `smart_home::sanitize_url` leert alles ohne http(s). Ohne Rueckmeldung
+    // saehe es aus, als haette das Feld die Eingabe vergessen.
+    const leer = mitSmartHome({})
+    vi.spyOn(api, 'setConfig').mockResolvedValue(leer)
+    vi.spyOn(api, 'getDisplayState').mockResolvedValue({} as never)
+    const w = setup(leer)
+
+    const feld = w.get('.smart-home input')
+    await feld.setValue('homeassistant.local:8123')
+    await feld.trigger('change')
+    await vi.waitFor(() => expect(w.text()).toContain('Nur Adressen mit http:// oder https://'))
+  })
+
+  it('reicht eine gueltige Adresse durch und schweigt', async () => {
+    const gesetzt = mitSmartHome({ url: ADRESSE })
+    const set = vi.spyOn(api, 'setConfig').mockResolvedValue(gesetzt)
+    vi.spyOn(api, 'getDisplayState').mockResolvedValue({} as never)
+    const w = setup(mitSmartHome({}))
+
+    const feld = w.get('.smart-home input')
+    await feld.setValue(ADRESSE)
+    await feld.trigger('change')
+    await vi.waitFor(() => expect(set).toHaveBeenCalled())
+    expect(set.mock.calls[0][0].smartHome.url).toBe(ADRESSE)
+    await vi.waitFor(() => expect(zeilen(w)).toContain('Zurück zur Diashow nach'))
+    expect(w.text()).not.toContain('Nur Adressen mit')
+  })
+})

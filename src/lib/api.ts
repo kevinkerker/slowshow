@@ -176,6 +176,18 @@ export const setPlaying = (playing: boolean): Promise<void> =>
 
 export const isPlaying = (): Promise<boolean> => invoke('is_playing')
 
+/**
+ * Öffnet die Smart-Home-Ansicht (FA-46, E-73).
+ *
+ * `true`, wenn sie offen ist. `false` ohne Adresse, außerhalb der Aktivzeit
+ * (E-79) und auf dem Desktop — dann bleibt der Tipp eine Pause. Ob geöffnet
+ * wird, entscheidet das Backend (`smart_home::plan_open`).
+ *
+ * @param label Aufschrift des Zurück-Knopfs in der Sprache der Oberfläche
+ */
+export const openSmartHome = (label: string): Promise<boolean> =>
+  invoke('open_smart_home', { label })
+
 /** Die als Nächstes anzuzeigenden Bild-Ids (FA-31). */
 export const prefetchWindow = (): Promise<string[]> => invoke('prefetch_window')
 

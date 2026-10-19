@@ -402,6 +402,73 @@ impl Default for MqttConfig {
     }
 }
 
+// ── Smart-Home-Ansicht ───────────────────────────────────────────────────────
+
+/// Ecke, in der der Zurück-Knopf über der Smart-Home-Ansicht steht (FA-46, E-74).
+///
+/// Voreinstellung oben rechts: die Seitenleiste des geplanten
+/// Home-Assistant-Dashboards liegt links, der Knopf soll dort nichts
+/// verdecken. Oben rechts sitzt in der Diashow auch das Zahnrad (E-19).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ButtonCorner {
+    TopLeft,
+    #[default]
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+/// Smart-Home-Oberfläche als Vollbild über der Diashow (FA-46, E-72 bis E-79).
+///
+/// `default` am Typ statt an jedem Feld: eine Konfiguration von vor FA-46
+/// kennt den Block nicht, eine von Hand bearbeitete vielleicht nur einzelne
+/// Felder — beide sollen laden (NF-10).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SmartHomeConfig {
+    /// Adresse der Oberfläche, nur `http` und `https`. Leer heißt aus.
+    pub url: String,
+    /// Rückkehr zur Diashow nach so vielen Sekunden ohne Berührung (E-74, E-76).
+    pub timeout_seconds: u32,
+    /// Kleiner Knopf „Diashow“ über der Seite (E-74).
+    pub show_back_button: bool,
+    /// Ecke des Knopfs (E-74).
+    pub back_button_corner: ButtonCorner,
+}
+
+impl Default for SmartHomeConfig {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            timeout_seconds: crate::smart_home::TIMEOUT_DEFAULT_SECS,
+            show_back_button: true,
+            back_button_corner: ButtonCorner::TopRight,
+        }
+    }
+}
+
+impl SmartHomeConfig {
+    /// Ist die Ansicht eingerichtet? Erst dann öffnet der Tipp in die Mitte sie.
+    pub fn is_enabled(&self) -> bool {
+        !self.url.is_empty()
+    }
+
+    /// Wertebereiche erzwingen (FA-46).
+    ///
+    /// Eine Adresse, die nicht mit `http` oder `https` beginnt, wird geleert
+    /// statt gespeichert: `javascript:`, `file:` oder `intent:` in einer
+    /// Vollbild-WebView mit JavaScript wären ein Weg, beliebigen Code oder
+    /// App-Dateien in den Rahmen zu holen.
+    pub fn clamp(&mut self) {
+        self.url = crate::smart_home::sanitize_url(&self.url);
+        self.timeout_seconds = self.timeout_seconds.clamp(
+            crate::smart_home::TIMEOUT_MIN_SECS,
+            crate::smart_home::TIMEOUT_MAX_SECS,
+        );
+    }
+}
+
 // ── Gesamtkonfiguration ──────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -430,6 +497,9 @@ pub struct AppConfig {
     pub mqtt: MqttConfig,
     #[serde(default)]
     pub upnp: UpnpConfig,
+    /// Smart-Home-Ansicht hinter dem Tipp in die Mitte (FA-46).
+    #[serde(default)]
+    pub smart_home: SmartHomeConfig,
     /// Zwei Hochformatbilder nebeneinander (FA-08).
     #[serde(default)]
     pub pair_mode: bool,
@@ -481,6 +551,7 @@ impl Default for AppConfig {
             remote: RemoteConfig::default(),
             mqtt: MqttConfig::default(),
             upnp: UpnpConfig::default(),
+            smart_home: SmartHomeConfig::default(),
             pair_mode: false,
             ken_burns: false,
             protect_settings: true,
@@ -526,6 +597,8 @@ impl AppConfig {
         if self.upnp.udn.trim().is_empty() {
             self.upnp.udn = format!("uuid:{}", crate::upnp::new_uuid());
         }
+        // FA-46: nur http(s), Rückkehrzeit in ihrer Spanne (E-76).
+        self.smart_home.clamp();
         for s in &mut self.sources {
             s.sync_interval_minutes = s.sync_interval_minutes.clamp(5, 10_080);
             // E-70: die abgeleiteten Werte festschreiben, damit die Datei ab
@@ -1070,5 +1143,94 @@ mod tests {
         assert!(!s.meets_min_resolution(800, 600));
         // Standardquelle ohne Filter lässt alles durch.
         assert!(webdav_source().meets_min_resolution(1, 1));
+    }
+
+    // ── Smart-Home-Ansicht (FA-46) ───────────────────────────────────────────
+
+    #[test]
+    fn alte_konfiguration_ohne_smart_home_laedt_mit_voreinstellung_fa_46() {
+        // Eine config.json von vor FA-46 kennt den Block nicht. Ohne `default`
+        // schluege das Laden fehl, und der Rahmen startete mit Standardwerten
+        // statt mit den eigenen (NF-10).
+        let c: AppConfig = serde_json::from_str(r#"{"intervalSeconds": 45}"#).unwrap();
+        assert_eq!(c.interval_seconds, 45);
+        assert_eq!(c.smart_home, SmartHomeConfig::default());
+        assert!(!c.smart_home.is_enabled(), "ohne Adresse bleibt alles wie bisher");
+    }
+
+    #[test]
+    fn smart_home_voreinstellungen_e_74_e_76() {
+        let d = SmartHomeConfig::default();
+        assert_eq!(d.url, "");
+        assert_eq!(d.timeout_seconds, 120);
+        assert!(d.show_back_button, "Knopf ist voreingestellt an");
+        // Oben rechts, weil die Seitenleiste des Dashboards links liegt.
+        assert_eq!(d.back_button_corner, ButtonCorner::TopRight);
+    }
+
+    #[test]
+    fn smart_home_block_darf_unvollstaendig_sein() {
+        // Von Hand bearbeitet oder aus einer REST-Antwort zusammengesetzt:
+        // fehlende Felder bekommen ihre Voreinstellung.
+        let c: AppConfig = serde_json::from_str(
+            r#"{"smartHome": {"url": "http://homeassistant.local:8123/wandtablet/jetzt?kiosk"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            c.smart_home.url,
+            "http://homeassistant.local:8123/wandtablet/jetzt?kiosk"
+        );
+        assert_eq!(c.smart_home.timeout_seconds, 120);
+        assert!(c.smart_home.show_back_button);
+    }
+
+    #[test]
+    fn smart_home_reist_in_camel_case() {
+        // Das Frontend liest `smartHome.backButtonCorner` — ein anders
+        // geschriebenes Feld kaeme dort als `undefined` an, ohne Fehler.
+        let mut c = AppConfig::default();
+        c.smart_home.back_button_corner = ButtonCorner::BottomLeft;
+        let json = serde_json::to_value(&c).unwrap();
+        let sh = &json["smartHome"];
+        assert_eq!(sh["url"], "");
+        assert_eq!(sh["timeoutSeconds"], 120);
+        assert_eq!(sh["showBackButton"], true);
+        assert_eq!(sh["backButtonCorner"], "bottomLeft");
+    }
+
+    #[test]
+    fn smart_home_clamp_weist_fremde_schemata_ab_fa_46() {
+        let mut c = AppConfig::default();
+        for bad in [
+            "javascript:alert(1)",
+            "file:///data/data/dev.kerker.slowshow/config.json",
+            "intent://scan/#Intent;scheme=zxing;end",
+            "homeassistant.local:8123",
+            "ftp://nas.local/",
+        ] {
+            c.smart_home.url = bad.into();
+            c.clamp();
+            assert_eq!(c.smart_home.url, "", "{bad} haette geleert werden muessen");
+        }
+
+        c.smart_home.url = "  https://ha.example.org/lovelace/0?kiosk  ".into();
+        c.clamp();
+        assert_eq!(c.smart_home.url, "https://ha.example.org/lovelace/0?kiosk");
+    }
+
+    #[test]
+    fn smart_home_clamp_begrenzt_den_timeout_e_76() {
+        let mut c = AppConfig::default();
+        c.smart_home.timeout_seconds = 1;
+        c.clamp();
+        assert_eq!(c.smart_home.timeout_seconds, 30);
+
+        c.smart_home.timeout_seconds = 86_400;
+        c.clamp();
+        assert_eq!(c.smart_home.timeout_seconds, 1800);
+
+        c.smart_home.timeout_seconds = 300;
+        c.clamp();
+        assert_eq!(c.smart_home.timeout_seconds, 300, "Werte in der Spanne bleiben");
     }
 }

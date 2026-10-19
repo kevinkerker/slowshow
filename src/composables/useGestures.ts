@@ -11,6 +11,10 @@
  *        lang drücken: Einstellungen
  * ```
  *
+ * Ist eine Smart-Home-Oberfläche eingetragen, öffnet die Mitte sie statt zu
+ * pausieren (FA-46, E-73). Das entscheidet nicht die Erkennung hier, sondern
+ * der Handler in `SlideshowView.vue` — die Geste bleibt dieselbe.
+ *
  * Tippzonen zusätzlich zum Wischen: auf einem an der Wand hängenden Rahmen ist
  * ein kurzer Tipp bequemer als eine Wischbewegung, und wer den Rahmen nur
  * anhalten will, trifft die große Mitte.
@@ -56,7 +60,7 @@ export interface GestureHandlers {
   onSwipeRight: () => void
   /** Tipp links — ein Bild zurück. */
   onTapLeft: () => void
-  /** Tipp in die Mitte — Pause bzw. weiter. */
+  /** Tipp in die Mitte — Pause bzw. weiter, mit Adresse die Smart-Home-Ansicht (FA-46). */
   onTapCenter: () => void
   /** Tipp rechts — ein Bild weiter. */
   onTapRight: () => void

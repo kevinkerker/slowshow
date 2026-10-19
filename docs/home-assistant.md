@@ -15,6 +15,10 @@ auf einem echten Gerät geprüft.
 Tests mit `curl` und wenn kein Broker läuft. Beide Wege können gleichzeitig
 aktiv sein und lösen dieselben Aktionen aus.
 
+Umgekehrt zeigt der Rahmen auf Wunsch ein Home-Assistant-Dashboard: ein Tipp
+in die Bildmitte öffnet es als Vollbild. Siehe
+[Dashboard auf dem Rahmen](#dashboard-auf-dem-rahmen) am Ende.
+
 ---
 
 ## Ohne Eingabe: der Rahmen als Medienrenderer
@@ -561,3 +565,62 @@ anzeigt, sollte beide Sonderfälle abfangen.
 - **Kein HTTPS und keine Authentifizierung per Voreinstellung.** Der Server ist
   für das Heimnetz gedacht. Wer ihn absichern will, setzt in den Einstellungen
   ein Token; nach außen gehört der Port ohnehin nicht freigegeben.
+
+---
+
+# Dashboard auf dem Rahmen
+
+Hängt das Tablet an der Wand, ist Slowshow dort die Hauptanwendung — und das
+Dashboard ist einen Tipp entfernt (FA-46). Die Richtung ist umgekehrt zu
+allem oben: nicht Home Assistant steuert den Rahmen, sondern der Rahmen zeigt
+Home Assistant.
+
+**Einrichten.** In Slowshow unter *Einstellungen → System → Smart Home* die
+Adresse eintragen, etwa
+
+```text
+http://homeassistant.local:8123/wandtablet/jetzt?kiosk
+```
+
+Das `?kiosk` am Ende blendet Kopfzeile und Seitenleiste von Home Assistant
+aus, sofern das Dashboard es unterstützt (zum Beispiel mit der
+HACS-Erweiterung „kiosk-mode“). Ohne sie erscheint das Dashboard mit Leisten;
+es funktioniert trotzdem. Angenommen werden nur Adressen mit `http://` oder
+`https://`.
+
+**Bedienen.** Ein kurzer Tipp in die Bildmitte öffnet das Dashboard. Zurück
+zur Diashow geht es
+
+- von selbst nach der eingestellten Zeit ohne Berührung (Voreinstellung zwei
+  Minuten; jede Berührung startet sie neu),
+- über den Knopf „Diashow“, dessen Ecke sich wählen lässt (oder der sich
+  ausblenden lässt),
+- mit der Zurück-Taste bzw. -Geste, sobald es im Dashboard nicht weiter
+  zurückgeht.
+
+Außerhalb der Aktivzeit des Zeitplans öffnet der Tipp das Dashboard nicht —
+nachts steht die Helligkeit auf 1 %. Die Diashow hält an, solange das
+Dashboard offen ist, und läuft danach weiter; eine vorher gesetzte Pause
+bleibt bestehen.
+
+**Anmeldung bleibt gespeichert.** Beim ersten Öffnen zeigt Home Assistant
+seine Anmeldeseite. Einmal anmelden — am besten mit einem eigenen Benutzer
+ohne Administratorrechte, etwa „Wandtablet“ — und „Angemeldet bleiben“
+anhaken. Die Anmeldung liegt danach in der WebView des Rahmens und übersteht
+das Schließen des Dashboards und einen Neustart der App. Die WebView wird
+nach dem ersten Öffnen nur versteckt, nicht beendet: beim nächsten Tipp steht
+das Dashboard sofort da. Abgemeldet ist der Rahmen erst, wenn die App-Daten
+gelöscht werden.
+
+**Unverschlüsselt im Heimnetz.** Home Assistant läuft im Heimnetz meist unter
+`http://`. Slowshow lässt unverschlüsseltes HTTP ausdrücklich zu — aus
+demselben Grund wie für ein NAS über WebDAV (FA-21). Das ist für das eigene
+WLAN gedacht; wer das Dashboard über das Internet erreicht, nimmt die
+`https://`-Adresse (etwa über Nabu Casa).
+
+**Speicher.** Dashboard und Diashow teilen sich auf Android einen
+Renderer-Prozess. Ein Dashboard mit mehreren laufenden Kamerabildern braucht
+spürbar Arbeitsspeicher; wird es zu viel, beendet Android den Renderer, und
+Slowshow startet neu (R-03). Für die Wand lieber eine schlanke Ansicht mit
+wenigen Kameras anlegen.
+

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
-import { imageUrl, reportDisplaySize, stageUrl, THUMB_PREFIX, thumbUrl } from './api'
+import { imageUrl, openSmartHome, reportDisplaySize, stageUrl, THUMB_PREFIX, thumbUrl } from './api'
 
 /**
  * Die Bild-URLs sind eine Systemgrenze, die kein Compiler prüft: das Präfix
@@ -106,5 +106,16 @@ describe('reportDisplaySize', () => {
       width: 1920,
       height: 1200,
     })
+  })
+})
+
+describe('openSmartHome (FA-46)', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('ruft das Kommando mit der Aufschrift des Knopfs', async () => {
+    // Der Name steht doppelt: hier und als `commands::open_smart_home`.
+    vi.mocked(invoke).mockResolvedValue(true)
+    expect(await openSmartHome('Diashow')).toBe(true)
+    expect(invoke).toHaveBeenCalledWith('open_smart_home', { label: 'Diashow' })
   })
 })

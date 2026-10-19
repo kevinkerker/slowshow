@@ -71,7 +71,7 @@ impl Backend for Pappe {
     fn set_mute(&self, mute: bool) {
         self.update(|s| s.screen_active = !mute)
     }
-    fn stage_external(&self, image: Vec<u8>, title: String, uri: String) -> Result<(), String> {
+    fn stage_external(&self, image: Vec<u8>, title: String, uri: String) -> Result<String, String> {
         println!("[pappe] fremdbild {title:?} ({} bytes) von {uri}", image.len());
         self.update(|s| {
             s.current_title = title;
@@ -80,7 +80,25 @@ impl Backend for Pappe {
             s.external_uri = Some(uri);
             s.screen_active = true;
         });
+        Ok("ext".into())
+    }
+    // Seit E-67 verlangt der Trait die Livebild-Haken; die Pappe zaehlt nur mit.
+    fn external_alive(&self, id: &str) -> bool {
+        self.state
+            .lock()
+            .map(|s| s.external && s.current_id.as_deref() == Some(id))
+            .unwrap_or(false)
+    }
+    fn live_frame(&self, id: &str, image: Vec<u8>) -> Result<(), String> {
+        println!("[pappe] livebild {id} ({} bytes)", image.len());
         Ok(())
+    }
+    fn end_live(&self, id: &str) {
+        println!("[pappe] livebild {id} beendet");
+        self.update(|s| {
+            s.external = false;
+            s.external_uri = None;
+        })
     }
     fn current_image(&self) -> Option<Vec<u8>> {
         // Kleinstes gueltiges JPEG: nur die Marker, reicht fuer den Content-Type.

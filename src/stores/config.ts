@@ -11,6 +11,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { ref, computed } from 'vue'
 import * as api from '@/lib/api'
 import { applyLanguage } from '@/lib/i18n'
+import { isSmartHomeEnabled } from '@/lib/smartHome'
 import {
   EVENTS,
   type AppConfig,
@@ -96,6 +97,12 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   const ready = computed(() => config.value !== null)
+
+  /**
+   * Ist eine Smart-Home-Ansicht eingerichtet (FA-46)? Dann fragt der Tipp in
+   * die Mitte erst das Backend, ob er sie öffnen soll (E-73).
+   */
+  const smartHomeEnabled = computed(() => isSmartHomeEnabled(config.value))
 
   let unlisten: UnlistenFn[] = []
 
@@ -234,6 +241,7 @@ export const useConfigStore = defineStore('config', () => {
     errorFor,
     missingFor,
     ready,
+    smartHomeEnabled,
     load,
     dispose,
     refreshStats,

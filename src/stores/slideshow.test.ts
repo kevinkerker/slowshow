@@ -163,3 +163,102 @@ describe('slideshowStore: Livebild', () => {
     store.dispose()
   })
 })
+
+/**
+ * Smart-Home-Ansicht (FA-46).
+ *
+ * Solange sie über der Diashow liegt, hält die Diashow an; danach läuft sie
+ * weiter. Die Pause des Nutzers ist davon getrennt und darf nicht verloren
+ * gehen — wer vorher angehalten hatte, findet danach ein angehaltenes Bild vor.
+ */
+describe('slideshowStore: Smart-Home-Ansicht', () => {
+  function zuhoerer(name: string) {
+    const treffer = vi.mocked(listen).mock.calls.filter((c) => c[0] === name).pop()
+    if (!treffer) throw new Error(`Kein Zuhoerer fuer ${name}`)
+    return treffer[1] as (e: { payload: unknown }) => void
+  }
+
+  it('schaltet nicht weiter, solange die Ansicht offen ist', async () => {
+    const next = vi.spyOn(api, 'nextSlide').mockResolvedValue(SLIDE)
+    vi.spyOn(api, 'openSmartHome').mockResolvedValue(true)
+    const store = await starte()
+
+    expect(await store.openSmartHome('Diashow')).toBe(true)
+    expect(api.openSmartHome).toHaveBeenCalledWith('Diashow')
+    expect(store.suspended).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(TAKT * 5000)
+    expect(next).not.toHaveBeenCalled()
+    store.dispose()
+  })
+
+  it('laeuft nach dem Schliessen mit voller Anzeigedauer weiter', async () => {
+    const next = vi.spyOn(api, 'nextSlide').mockResolvedValue(SLIDE)
+    vi.spyOn(api, 'openSmartHome').mockResolvedValue(true)
+    const store = await starte()
+    await store.openSmartHome('Diashow')
+
+    zuhoerer(EVENTS.smartHomeClosed)({ payload: null })
+    expect(store.suspended).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(TAKT * 1000 - 1)
+    expect(next).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(next).toHaveBeenCalledTimes(1)
+    store.dispose()
+  })
+
+  it('laesst die Pause des Nutzers unangetastet', async () => {
+    const next = vi.spyOn(api, 'nextSlide').mockResolvedValue(SLIDE)
+    const setPlaying = vi.spyOn(api, 'setPlaying').mockResolvedValue()
+    vi.spyOn(api, 'openSmartHome').mockResolvedValue(true)
+    const store = await starte()
+    await store.togglePlaying()
+    setPlaying.mockClear()
+
+    await store.openSmartHome('Diashow')
+    zuhoerer(EVENTS.smartHomeClosed)({ payload: null })
+
+    // Weder beim Oeffnen noch beim Schliessen ein Wort ans Backend: die
+    // Pause bleibt die des Nutzers, und Home Assistant sieht keinen Wechsel.
+    expect(setPlaying).not.toHaveBeenCalled()
+    expect(store.playing).toBe(false)
+    await vi.advanceTimersByTimeAsync(TAKT * 3000)
+    expect(next).not.toHaveBeenCalled()
+    store.dispose()
+  })
+
+  it('haelt nicht an, wenn das Backend nicht oeffnet', async () => {
+    // Nachts (E-79), ohne Adresse oder auf dem Desktop: der Aufrufer schaltet
+    // dann die Pause um, und die Diashow darf nicht zusaetzlich stehen.
+    vi.spyOn(api, 'openSmartHome').mockResolvedValue(false)
+    const store = await starte()
+    expect(await store.openSmartHome('Diashow')).toBe(false)
+    expect(store.suspended).toBe(false)
+    store.dispose()
+  })
+
+  it('wirft nicht, wenn die Bruecke scheitert', async () => {
+    vi.spyOn(api, 'openSmartHome').mockRejectedValue(new Error('Brücke weg'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const store = await starte()
+    expect(await store.openSmartHome('Diashow')).toBe(false)
+    expect(store.suspended).toBe(false)
+    store.dispose()
+  })
+
+  it('laeuft weiter, wenn das Schliessen-Ereignis verloren ging', async () => {
+    // Die Oberflaeche ruft `resumeFromSmartHome` bei jeder Beruehrung, die
+    // die Diashow erreicht — dann liegt die Ansicht nicht mehr darueber.
+    const next = vi.spyOn(api, 'nextSlide').mockResolvedValue(SLIDE)
+    vi.spyOn(api, 'openSmartHome').mockResolvedValue(true)
+    const store = await starte()
+    await store.openSmartHome('Diashow')
+
+    store.resumeFromSmartHome()
+    expect(store.suspended).toBe(false)
+    await vi.advanceTimersByTimeAsync(TAKT * 1000)
+    expect(next).toHaveBeenCalledTimes(1)
+    store.dispose()
+  })
+})

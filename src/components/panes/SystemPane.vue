@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * Cache, Sprache, Heimnetz-Steuerung und Konfigurationsdateien
- * (FA-27, FA-31, FA-43, FA-45, FA-55, NF-09, NF-12).
+ * Cache, Sprache, Smart-Home-Ansicht, Heimnetz-Steuerung und
+ * Konfigurationsdateien (FA-27, FA-31, FA-43, FA-45, FA-46, FA-55, NF-09, NF-12).
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -18,7 +18,14 @@ import { formatBytes } from '@/lib/format'
 import { currentDevice } from '@/lib/device'
 import { backupFileName, isAvailable, openTextFile, saveTextFile } from '@/lib/saf'
 import { localeTag, type Language } from '@/lib/i18n'
-import { EVENTS, type DatabaseCheck, type MqttStatus, type StorageBreakdown } from '@/lib/types'
+import { CORNERS, timeoutChoices, timeoutLabel, urlWasRejected } from '@/lib/smartHome'
+import {
+  EVENTS,
+  type ButtonCorner,
+  type DatabaseCheck,
+  type MqttStatus,
+  type StorageBreakdown,
+} from '@/lib/types'
 
 const { t } = useI18n()
 const store = useConfigStore()
@@ -36,6 +43,7 @@ const configFeedback = useFeedback()
 const dbFeedback = useFeedback()
 const reportFeedback = useFeedback()
 const copyFeedback = useFeedback()
+const smartHomeFeedback = useFeedback()
 
 const mqttPassword = ref('')
 const mqttHasPassword = ref(false)
@@ -111,6 +119,46 @@ const LANGUAGES: Language[] = ['auto', 'de', 'en']
 
 function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
+}
+
+// ── Smart-Home-Ansicht (FA-46) ──────────────────────────────────────────────
+
+/**
+ * Adresse übernehmen. Das Backend leert alles, was nicht mit http oder https
+ * beginnt (`smart_home::sanitize_url`); das sagt die Rückmeldung neben dem
+ * Feld, sonst sähe es aus, als hätte das Feld die Eingabe vergessen.
+ */
+async function setSmartHomeUrl(value: string) {
+  smartHomeFeedback.clear()
+  try {
+    await store.patch((d) => (d.smartHome.url = value))
+    if (urlWasRejected(value, store.config?.smartHome?.url ?? '')) {
+      smartHomeFeedback.error(t('system.smartHomeUrlRejected'))
+    }
+  } catch (e) {
+    smartHomeFeedback.error(message(e))
+  }
+}
+
+function timeoutText(seconds: number): string {
+  const { key, n } = timeoutLabel(seconds)
+  return key === 'system.smartHomeMinutes'
+    ? t('system.smartHomeMinutes', { n }, n)
+    : t('system.smartHomeSeconds', { n })
+}
+
+/** Ausgeschrieben statt zusammengesetzt, damit der Schlüsseltest sie sieht. */
+function cornerText(corner: ButtonCorner): string {
+  switch (corner) {
+    case 'topLeft':
+      return t('system.smartHomeCornerTopLeft')
+    case 'bottomLeft':
+      return t('system.smartHomeCornerBottomLeft')
+    case 'bottomRight':
+      return t('system.smartHomeCornerBottomRight')
+    default:
+      return t('system.smartHomeCornerTopRight')
+  }
 }
 
 // ── Speicher, Datenbank, Diagnose (Wartung F9–F11, E-31) ────────────────────
@@ -411,6 +459,59 @@ async function importConfig() {
         </div>
       </div>
     </div>
+
+    <!-- FA-46: die Smart-Home-Ansicht hinter dem Tipp in die Mitte (E-73).
+         Rückkehrzeit und Ecke erst mit Adresse, die Ecke nur mit Knopf —
+         was ohne Wirkung ist, steht nicht da (wie bei E-22). -->
+    <section v-if="cfg.smartHome" class="smart-home">
+      <h3 class="ss-label">{{ t('system.smartHome') }}</h3>
+
+      <SettingRow :label="t('system.smartHomeUrl')" :hint="t('system.smartHomeUrlHint')" stacked>
+        <input
+          type="url"
+          inputmode="url"
+          autocapitalize="off"
+          autocomplete="off"
+          spellcheck="false"
+          :placeholder="t('system.smartHomeUrlPlaceholder')"
+          :value="cfg.smartHome.url"
+          @change="setSmartHomeUrl(($event.target as HTMLInputElement).value)"
+        />
+        <SsFeedback :feedback="smartHomeFeedback.feedback.value" />
+      </SettingRow>
+
+      <template v-if="cfg.smartHome.url">
+        <SettingRow :label="t('system.smartHomeTimeout')" :hint="t('system.smartHomeTimeoutHint')">
+          <select
+            :value="cfg.smartHome.timeoutSeconds"
+            class="narrow"
+            @change="store.patch((d) => (d.smartHome.timeoutSeconds = Number(($event.target as HTMLSelectElement).value)))"
+          >
+            <option v-for="s in timeoutChoices(cfg.smartHome.timeoutSeconds)" :key="s" :value="s">
+              {{ timeoutText(s) }}
+            </option>
+          </select>
+        </SettingRow>
+
+        <SettingRow :label="t('system.smartHomeButton')" :hint="t('system.smartHomeButtonHint')">
+          <ToggleSwitch
+            :model-value="cfg.smartHome.showBackButton"
+            :label="t('system.smartHomeButton')"
+            @update:model-value="(v) => store.patch((d) => (d.smartHome.showBackButton = v))"
+          />
+        </SettingRow>
+
+        <SettingRow v-if="cfg.smartHome.showBackButton" :label="t('system.smartHomeCorner')">
+          <select
+            :value="cfg.smartHome.backButtonCorner"
+            class="narrow"
+            @change="store.patch((d) => (d.smartHome.backButtonCorner = ($event.target as HTMLSelectElement).value as ButtonCorner))"
+          >
+            <option v-for="c in CORNERS" :key="c" :value="c">{{ cornerText(c) }}</option>
+          </select>
+        </SettingRow>
+      </template>
+    </section>
 
     <section>
       <h3 class="ss-label">{{ t('system.remote') }}</h3>

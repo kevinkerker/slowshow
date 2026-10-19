@@ -79,6 +79,8 @@ pub fn set_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig)
     let display = state.display_state();
     crate::brightness::apply(display.brightness);
     crate::orientation::apply(updated.orientation);
+    // FA-46, E-75: neue Adresse laden, geleerte WebView zerstoeren.
+    crate::smart_home::apply_config(&before.smart_home, &updated.smart_home);
     let _ = app.emit(events::CONFIG, &updated);
     let _ = app.emit(events::DISPLAY, display);
     Ok(updated)
@@ -113,8 +115,11 @@ pub fn import_config(app: AppHandle, state: State<'_, AppState>, json: String) -
     let backup = crate::maintenance::parse_backup(&json).map_err(|e| e.to_string())?;
     let imported = backup.config;
 
+    let before = state.config_snapshot();
     let updated = state.update_config(|c| *c = imported)?;
     state.rebuild_playlist();
+    // Die Sicherung traegt die Smart-Home-Ansicht mit (FA-45, FA-46).
+    crate::smart_home::apply_config(&before.smart_home, &updated.smart_home);
     let _ = app.emit(events::CONFIG, &updated);
     Ok(updated)
 }
@@ -226,6 +231,25 @@ pub fn cache_stats(state: State<'_, AppState>) -> CacheStats {
 #[tauri::command]
 pub fn apply_orientation(state: State<'_, AppState>) {
     crate::orientation::apply(state.config_snapshot().orientation);
+}
+
+/// Öffnet die Smart-Home-Ansicht (FA-46, E-73).
+///
+/// Liefert `false`, wenn sie nicht geöffnet wurde: keine Adresse, außerhalb
+/// der Aktivzeit (E-79), auf dem Desktop oder ohne JNI-Brücke. Die Oberfläche
+/// schaltet dann wie bisher die Pause um. Ein Fehler wird bewusst nicht
+/// geworfen — ein Tipp auf den Rahmen soll nie mit einer Fehlermeldung enden.
+///
+/// `label` ist die Aufschrift des Zurück-Knopfs in der Sprache der Oberfläche.
+#[tauri::command]
+pub fn open_smart_home(
+    state: State<'_, AppState>,
+    view: State<'_, crate::smart_home::SmartHomeView>,
+    label: String,
+) -> bool {
+    let cfg = state.config_snapshot();
+    let display = state.display_state();
+    crate::smart_home::open(&view, &cfg.smart_home, display.slideshow_active, &label)
 }
 
 /// Jahre und Absender, nach denen sich filtern lässt — mit Anzahl (F5).

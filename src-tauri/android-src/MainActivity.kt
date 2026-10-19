@@ -8,6 +8,7 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.webkit.WebView
@@ -36,6 +37,8 @@ import androidx.webkit.WebViewFeature
  *  - NF-01  Vordergrunddienst gegen den Abschuss bei Speicherdruck (E-24)
  *  - E-26   Ausrichtung des Rahmens aus der App heraus setzen
  *  - E-64   Keine algorithmische Abdunkelung der WebView
+ *  - FA-46  Smart-Home-Ansicht über der Diashow (E-72 bis E-79, siehe
+ *           `SmartHomeOverlay.kt`)
  *
  * Bewusst **nicht** übernommen aus vergleichbaren Projekten: `FLAG_SECURE`.
  * Für eine Tresor-App ist das richtig, für einen Bilderrahmen wäre es
@@ -133,6 +136,92 @@ class MainActivity : TauriActivity() {
     override fun onResume() {
         super.onResume()
         enterImmersiveMode()
+        smartHome?.onActivityResume()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        smartHome?.onActivityPause()
+    }
+
+    override fun onDestroy() {
+        // Ohne Meldung an Rust: die App läuft herunter (siehe
+        // `SmartHomeOverlay.destroy`).
+        smartHome?.destroy(notify = false)
+        smartHome = null
+        super.onDestroy()
+    }
+
+    // ── Smart-Home-Ansicht (FA-46) ───────────────────────────────────────────
+
+    /** Entsteht erst beim ersten Öffnen (E-75); vorher kostet sie nichts. */
+    private var smartHome: SmartHomeOverlay? = null
+
+    /**
+     * Jede Berührung startet den Timeout der Smart-Home-Ansicht neu (E-74).
+     *
+     * Hier und nicht in der WebView: die Activity sieht jede Berührung zuerst,
+     * auch die auf dem Knopf, und braucht dafür keinen eigenen Touch-Listener,
+     * der der Seite Gesten wegnehmen könnte.
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        smartHome?.onTouch(ev)
+        return super.dispatchTouchEvent(ev)
+    }
+
+    /**
+     * Öffnet die Smart-Home-Ansicht (FA-46). Aufgerufen aus
+     * `smart_home::open` über JNI; ob überhaupt geöffnet wird, hat Rust
+     * schon entschieden (E-73, E-79).
+     *
+     * @param corner 0 oben links, 1 oben rechts, 2 unten links, 3 unten rechts
+     * @param label Aufschrift des Knopfs in der Sprache der Oberfläche
+     */
+    @Keep
+    fun showSmartHome(url: String, timeoutSeconds: Int, showButton: Boolean, corner: Int, label: String) {
+        runOnUiThread {
+            try {
+                val overlay = smartHome
+                    ?: SmartHomeOverlay(this) { notifySmartHomeClosed() }.also { smartHome = it }
+                overlay.show(url, timeoutSeconds, showButton, corner, label)
+                // Ein Fokuswechsel in die neue WebView kann die Leisten
+                // zurückholen (FA-01).
+                enterImmersiveMode()
+            } catch (e: Throwable) {
+                // Etwa wenn die System-WebView gerade aktualisiert wird. Die
+                // Oberfläche muss es erfahren, sonst stünde die Diashow still.
+                Log.w(TAG, "Smart-Home-Ansicht nicht geöffnet: $e")
+                notifySmartHomeClosed()
+            }
+        }
+    }
+
+    /**
+     * Neue Einstellungen für eine bestehende Ansicht (E-75): neue Adresse
+     * laden, geleerte Adresse zerstört die WebView. Ohne WebView ein No-op.
+     */
+    @Keep
+    fun configureSmartHome(url: String, timeoutSeconds: Int, showButton: Boolean, corner: Int) {
+        runOnUiThread {
+            try {
+                smartHome?.configure(url, timeoutSeconds, showButton, corner)
+            } catch (e: Throwable) {
+                Log.w(TAG, "Smart-Home-Ansicht nicht umgestellt: $e")
+            }
+        }
+    }
+
+    /** Meldet das Schließen an Rust (`smart_home::closed_from_native`). */
+    private external fun nativeSmartHomeClosed()
+
+    private fun notifySmartHomeClosed() {
+        try {
+            nativeSmartHomeClosed()
+        } catch (e: Throwable) {
+            // Ohne Brücke bleibt die Oberfläche angehalten, bis jemand tippt —
+            // dann merkt sie selbst, dass die Ansicht weg ist.
+            Log.w(TAG, "Schließen der Smart-Home-Ansicht nicht gemeldet: $e")
+        }
     }
 
     /**

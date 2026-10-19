@@ -3,7 +3,8 @@
  * Die Diashow — Hauptansicht der App (Artboards D1–D6).
  *
  * Vollbild, Endlosschleife, Bedienung ausschließlich über Gesten. Außerhalb der
- * Aktivzeit übernimmt der Nachtmodus (FA-52, FA-54).
+ * Aktivzeit übernimmt der Nachtmodus (FA-52, FA-54). Ist eine
+ * Smart-Home-Oberfläche eingetragen, öffnet der Tipp in die Mitte sie (FA-46).
  *
  * Immer dunkel, auch wenn das System hell eingestellt ist (E-64): das Foto
  * ist die einzige helle Fläche, und nachts bleibt der Schirm dunkel. Die
@@ -132,6 +133,10 @@ const gestures = createGestureRecognizer({
   onTapRight: whenReady(() => void show.next()),
   onTapLeft: whenReady(() => void show.prev()),
   onTapCenter: whenReady(async () => {
+    // FA-46, E-73: Ist eine Smart-Home-Oberfläche eingetragen, öffnet die
+    // Mitte sie statt zu pausieren. Ob wirklich geöffnet wird, entscheidet
+    // das Backend — nachts (E-79) und auf dem Desktop bleibt es die Pause.
+    if (config.smartHomeEnabled && (await show.openSmartHome(t('smartHome.back')))) return
     await show.togglePlaying()
     // Kein kurzer Hinweis: den Zustand zeigt das Abzeichen, solange er gilt.
     flash('')
@@ -155,6 +160,16 @@ const gestures = createGestureRecognizer({
  */
 function openSettings() {
   router.push('/settings')
+}
+
+/**
+ * Jede Berührung, die hier ankommt, beweist: über der Diashow liegt keine
+ * Smart-Home-Ansicht mehr. Ging das Schließen-Ereignis verloren, läuft die
+ * Diashow spätestens jetzt weiter (NF-01).
+ */
+function onPointerDown(e: PointerEvent) {
+  show.resumeFromSmartHome()
+  gestures.down(e.clientX, e.clientY)
 }
 
 function flash(message: string) {
@@ -203,7 +218,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     class="slideshow ss-always-dark"
-    @pointerdown="gestures.down($event.clientX, $event.clientY)"
+    @pointerdown="onPointerDown"
     @pointermove="gestures.move($event.clientX, $event.clientY)"
     @pointerup="gestures.up($event.clientX, $event.clientY, ($event.currentTarget as HTMLElement).clientWidth)"
     @pointercancel="gestures.cancel()"

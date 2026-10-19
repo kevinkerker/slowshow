@@ -42,4 +42,9 @@ describe('EVENTS', () => {
     expect(EVENTS.display).toBe('slowshow://display')
     expect(EVENTS.config).toBe('slowshow://config')
   })
+
+  it('kennt das Schliessen der Smart-Home-Ansicht wie state::events (FA-46)', () => {
+    // Kommt es nicht an, bliebe die Diashow nach der Rueckkehr angehalten.
+    expect(EVENTS.smartHomeClosed).toBe('slowshow://smart-home-closed')
+  })
 })

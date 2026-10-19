@@ -37,6 +37,7 @@ src-tauri/                Rust-Backend — der eigentliche Kern
 │   ├── playlist.rs       Reihenfolge         (FA-01, FA-03, FA-08)
 │   ├── schedule.rs       Zeitplan            (FA-52 bis FA-54)
 │   ├── remote.rs         Heimnetz-Steuerung  (FA-55)
+│   ├── smart_home.rs     Smart-Home-Ansicht  (FA-46)
 │   └── commands.rs       Schnittstelle zum Frontend
 └── android-src/          Handgeschriebener Kotlin-Code (siehe unten)
 ```
@@ -187,14 +188,32 @@ Delta-Abgleich, Zeitplan über Mitternacht, EXIF-Orientierung.
 ```text
 ┌───────────┬───────────┬───────────┐
 │  zurück   │   Pause   │  weiter   │   kurz tippen
+│           │ (Smart    │           │
+│           │  Home¹)   │           │
 └───────────┴───────────┴───────────┘
      ← wischen: weiter · wischen: zurück →
           lange drücken: Einstellungen
+
+¹ nur, wenn unter System → Smart Home eine Adresse eingetragen ist
 ```
 
 Wischen und Tippen führen zum selben Ergebnis — was bequemer ist, hängt davon
 ab, ob der Rahmen in Reichweite hängt. Die Mitte ist bewusst groß: Pause ist die
 harmlose Aktion.
+
+**Smart-Home-Ansicht (FA-46).** Ist unter *System → Smart Home* die Adresse
+einer Smart-Home-Oberfläche eingetragen — etwa ein Home-Assistant-Dashboard wie
+`http://homeassistant.local:8123/wandtablet/jetzt?kiosk` —, öffnet der Tipp in
+die Mitte diese Seite als Vollbild, statt zu pausieren. Links, rechts, Wischen
+und langer Druck bleiben unverändert. Zurück zur Diashow geht es nach der
+eingestellten Zeit ohne Berührung (Voreinstellung zwei Minuten), über den
+kleinen Knopf „Diashow“ in der gewählten Ecke oder mit der Zurück-Taste, sobald
+es in der Seite nicht weiter zurückgeht. Die Diashow hält währenddessen an und
+läuft danach weiter; eine eigene Pause bleibt bestehen. Außerhalb der Aktivzeit
+öffnet der Tipp die Seite nicht. Die Seite läuft in einer eigenen
+Android-WebView, die nach dem ersten Öffnen nur versteckt wird — die Anmeldung
+bleibt erhalten. Auf dem Desktop-Build hat die Einstellung keine Wirkung.
+Einrichtung in Home Assistant: [docs/home-assistant.md](docs/home-assistant.md#dashboard-auf-dem-rahmen).
 
 ### Für den Dauerbetrieb empfohlen
 

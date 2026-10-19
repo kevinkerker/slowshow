@@ -48,7 +48,13 @@
 
   <application-attributes>
     <!-- HTTP im Heimnetz muss möglich bleiben: viele NAS-Systeme sprechen
-         intern ausschließlich unverschlüsselt (FA-21 nennt HTTP ausdrücklich). -->
+         intern ausschließlich unverschlüsselt (FA-21 nennt HTTP ausdrücklich).
+         Dasselbe gilt für die Smart-Home-Ansicht (FA-46): Home Assistant
+         läuft im Heimnetz meist unter http://homeassistant.local:8123. Das
+         Attribut gilt für die ganze App, also auch für deren native WebView;
+         eine Network-Security-Config gibt es bewusst nicht, sie würde es
+         übersteuern. Welche Adressen die WebView überhaupt bekommt, prüft
+         `smart_home::sanitize_url` (nur http und https). -->
     <attribute name="android:usesCleartextTraffic" value="true" />
 
     <!-- Konfiguration und Cache gehören nicht in ein Cloud-Backup:

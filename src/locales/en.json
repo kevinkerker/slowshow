@@ -11,6 +11,9 @@
     "system": "System",
     "close": "Close"
   },
+  "smartHome": {
+    "back": "Slideshow"
+  },
   "slideshow": {
     "empty": "No photos yet",
     "emptyHint": "Add a source to start the slideshow.",
@@ -308,6 +311,22 @@
   },
   "system": {
     "title": "System",
+    "smartHome": "Smart home",
+    "smartHomeUrl": "Dashboard address",
+    "smartHomeUrlHint": "A short tap in the middle of the photo opens this page full screen, for example a Home Assistant dashboard ending in ?kiosk. Leave empty to turn this off.",
+    "smartHomeUrlPlaceholder": "http://homeassistant.local:8123/…",
+    "smartHomeUrlRejected": "Only addresses starting with http:// or https://",
+    "smartHomeTimeout": "Back to the slideshow after",
+    "smartHomeTimeoutHint": "Counted from the last touch.",
+    "smartHomeSeconds": "{n} seconds",
+    "smartHomeMinutes": "{n} minute | {n} minutes",
+    "smartHomeButton": "Show “Slideshow” button",
+    "smartHomeButtonHint": "A small button above the page leads straight back.",
+    "smartHomeCorner": "Button corner",
+    "smartHomeCornerTopLeft": "Top left",
+    "smartHomeCornerTopRight": "Top right",
+    "smartHomeCornerBottomLeft": "Bottom left",
+    "smartHomeCornerBottomRight": "Bottom right",
     "cache": "Cache",
     "cacheUsage": "{used} of {total}",
     "cacheImages": "{n} photos",
